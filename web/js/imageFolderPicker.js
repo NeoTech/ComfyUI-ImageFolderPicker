@@ -1,6 +1,6 @@
 /**
  * Image Folder Picker - Frontend Extension for ComfyUI
- * Displays folder images as selectable thumbnails with pagination
+ * Displays folder images as selectable thumbnails with 3 tabs
  */
 
 import { app } from "../../scripts/app.js";
@@ -10,10 +10,9 @@ console.log("[ImageFolderPicker] Extension loading...");
 
 const THUMBNAIL_SIZE = 80;
 const THUMBNAIL_PADDING = 6;
-const GALLERY_MARGIN = 8;
-const WIDGET_HEIGHT = 26;
-const HEADER_HEIGHT = 30;
-const NAV_HEIGHT = 28; // Height for pagination controls
+const TAB_HEIGHT = 26;
+const NAV_HEIGHT = 26;
+const CONTROLS_HEIGHT = 30;
 
 app.registerExtension({
     name: "Comfy.ImageFolderPicker",
@@ -28,495 +27,418 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function() {
             const result = onNodeCreated?.apply(this, arguments);
             
-            console.log("[ImageFolderPicker] Node created, initializing...");
+            // Current active tab (0, 1, 2)
+            this.activeTab = 0;
             
-            // Node state
-            this.images = [];
-            this.thumbnailCache = {};
-            this.selectedIndex = -1;
-            this.currentPage = 0;
-            this.isLoading = false;
+            // State for each tab
+            this.tabState = [
+                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false },
+                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false },
+                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false }
+            ];
             
-            // Set initial size
-            this.size = [340, 400];
-            this.resizable = true;
+            // Set initial size - must be large enough
+            this.size[0] = Math.max(this.size[0], 380);
+            this.size[1] = Math.max(this.size[1], 500);
             
             // Setup after widgets are created
-            setTimeout(() => {
-                this.setupWidgets();
-            }, 50);
+            setTimeout(() => this.setupWidgets(), 100);
             
             return result;
         };
         
-        // Setup widgets
         nodeType.prototype.setupWidgets = function() {
-            console.log("[ImageFolderPicker] Setting up widgets");
-            
             if (this._widgetsSetup) return;
             this._widgetsSetup = true;
             
-            // Find widgets
-            this.folderWidget = this.widgets?.find(w => w.name === "folder");
-            this.selectedWidget = this.widgets?.find(w => w.name === "selected_image");
+            // Store references to widgets
+            this.folderWidgets = [
+                this.widgets?.find(w => w.name === "folder1"),
+                this.widgets?.find(w => w.name === "folder2"),
+                this.widgets?.find(w => w.name === "folder3")
+            ];
             
-            // Hide selected_image widget visually but keep it in array for serialization
-            if (this.selectedWidget) {
-                this.selectedWidget.type = "hidden";
-                this.selectedWidget.computeSize = () => [0, -4]; // Minimal size
-            }
+            this.selectedWidgets = [
+                this.widgets?.find(w => w.name === "selected_image1"),
+                this.widgets?.find(w => w.name === "selected_image2"),
+                this.widgets?.find(w => w.name === "selected_image3")
+            ];
             
-            // Add Load button
-            this.addWidget("button", "📂 Load Images", null, () => {
-                this.loadFolderImages();
-            });
-            
-            // Load images if folder already has a value
-            if (this.folderWidget?.value) {
-                this.loadFolderImages();
+            // Hide all widgets - we draw our own UI
+            if (this.widgets) {
+                for (const w of this.widgets) {
+                    w.type = "hidden";
+                    w.computeSize = () => [0, -4];
+                }
             }
             
             this.setDirtyCanvas(true);
         };
         
-        // Load images from folder via API
-        nodeType.prototype.loadFolderImages = async function(forceRefresh = false) {
-            const folder = this.folderWidget?.value;
-            console.log("[ImageFolderPicker] Loading folder:", folder);
+        nodeType.prototype.getState = function() {
+            return this.tabState?.[this.activeTab] || { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false };
+        };
+        
+        nodeType.prototype.loadImages = async function(tabIdx) {
+            const folder = this.folderWidgets?.[tabIdx]?.value;
+            const state = this.tabState[tabIdx];
             
             if (!folder) {
-                this.images = [];
+                state.images = [];
                 this.setDirtyCanvas(true);
                 return;
             }
             
-            this.isLoading = true;
-            this.currentPage = 0;
+            state.isLoading = true;
+            state.currentPage = 0;
             this.setDirtyCanvas(true);
             
             try {
-                if (forceRefresh) {
-                    await api.fetchApi("/imagefolderpicker/refresh", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ folder })
-                    });
-                }
-                
-                const response = await api.fetchApi(
-                    `/imagefolderpicker/list?folder=${encodeURIComponent(folder)}`
-                );
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    this.images = data.images || [];
-                    console.log("[ImageFolderPicker] Loaded", this.images.length, "images");
+                const resp = await api.fetchApi(`/imagefolderpicker/list?folder=${encodeURIComponent(folder)}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    state.images = data.images || [];
+                    state.thumbnailCache = {};
                     
-                    this.thumbnailCache = {};
-                    
-                    // Restore selection
-                    const currentSelected = this.selectedWidget?.value;
-                    if (currentSelected) {
-                        const idx = this.images.findIndex(img => img.filename === currentSelected);
-                        this.selectedIndex = idx >= 0 ? idx : -1;
-                        // Go to page containing selected image
-                        if (this.selectedIndex >= 0) {
-                            const layout = this.getGalleryLayout();
-                            this.currentPage = Math.floor(this.selectedIndex / layout.imagesPerPage);
-                        }
+                    // Restore selection if exists
+                    const sel = this.selectedWidgets?.[tabIdx]?.value;
+                    if (sel) {
+                        const idx = state.images.findIndex(i => i.filename === sel);
+                        state.selectedIndex = idx >= 0 ? idx : -1;
                     }
                     
-                    this.preloadThumbnails();
+                    this.loadThumbnails(tabIdx);
                 } else {
-                    console.error("[ImageFolderPicker] Failed to load folder");
-                    this.images = [];
+                    state.images = [];
                 }
             } catch (e) {
-                console.error("[ImageFolderPicker] Error loading folder:", e);
-                this.images = [];
+                console.error("[ImageFolderPicker] Load error:", e);
+                state.images = [];
             }
             
-            this.isLoading = false;
+            state.isLoading = false;
             this.setDirtyCanvas(true);
         };
         
-        // Preload thumbnail images
-        nodeType.prototype.preloadThumbnails = function() {
-            const folder = this.folderWidget?.value;
+        nodeType.prototype.loadThumbnails = function(tabIdx) {
+            const folder = this.folderWidgets?.[tabIdx]?.value;
+            const state = this.tabState[tabIdx];
             if (!folder) return;
             
             const node = this;
-            for (const imgData of this.images) {
-                if (this.thumbnailCache[imgData.filename] !== undefined) continue;
+            for (const img of state.images) {
+                if (state.thumbnailCache[img.filename] !== undefined) continue;
+                state.thumbnailCache[img.filename] = false;
                 
-                this.thumbnailCache[imgData.filename] = false;
-                
-                const img = new Image();
-                img.onload = function() {
-                    node.thumbnailCache[imgData.filename] = img;
-                    node.setDirtyCanvas(true);
-                };
-                img.onerror = function() {
-                    node.thumbnailCache[imgData.filename] = null;
-                    node.setDirtyCanvas(true);
-                };
-                img.src = `/imagefolderpicker/thumbnail?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(imgData.filename)}`;
+                const image = new Image();
+                image.onload = () => { state.thumbnailCache[img.filename] = image; node.setDirtyCanvas(true); };
+                image.onerror = () => { state.thumbnailCache[img.filename] = null; node.setDirtyCanvas(true); };
+                image.src = `/imagefolderpicker/thumbnail?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(img.filename)}`;
             }
         };
         
-        // Get gallery top position
-        nodeType.prototype.getGalleryTop = function() {
-            const outputCount = this.outputs?.length || 0;
-            const outputHeight = outputCount > 0 ? 20 + outputCount * 20 : 20;
+        nodeType.prototype.getLayout = function() {
+            // Calculate layout dimensions
+            const outputH = (this.outputs?.length || 0) * 20 + 6;
+            const top = 30 + outputH; // Header + outputs
+            const contentTop = top + TAB_HEIGHT + CONTROLS_HEIGHT;
+            const navY = this.size[1] - NAV_HEIGHT - 4;
+            const galleryHeight = navY - contentTop - 8;
             
-            let visibleWidgets = 0;
-            if (this.widgets) {
-                for (const w of this.widgets) {
-                    if (w.type !== "hidden") {
-                        visibleWidgets++;
-                    }
-                }
-            }
+            const w = this.size[0] - 16;
+            const cols = Math.max(1, Math.floor(w / (THUMBNAIL_SIZE + THUMBNAIL_PADDING)));
+            const rows = Math.max(1, Math.floor(galleryHeight / (THUMBNAIL_SIZE + THUMBNAIL_PADDING)));
+            const perPage = cols * rows;
             
-            return HEADER_HEIGHT + outputHeight + (visibleWidgets * WIDGET_HEIGHT) + GALLERY_MARGIN;
+            const state = this.getState();
+            const total = state.images?.length || 0;
+            const pages = Math.max(1, Math.ceil(total / perPage));
+            
+            return { top, contentTop, navY, galleryHeight, cols, rows, perPage, pages, w };
         };
         
-        // Calculate gallery layout with pagination
-        nodeType.prototype.getGalleryLayout = function() {
-            const galleryTop = this.getGalleryTop();
-            const availableWidth = this.size[0] - THUMBNAIL_PADDING * 2;
-            const availableHeight = this.size[1] - galleryTop - NAV_HEIGHT - THUMBNAIL_PADDING;
-            
-            // Calculate how many columns and rows fit
-            const cols = Math.max(1, Math.floor(availableWidth / (THUMBNAIL_SIZE + THUMBNAIL_PADDING)));
-            const rows = Math.max(1, Math.floor(availableHeight / (THUMBNAIL_SIZE + THUMBNAIL_PADDING)));
-            const imagesPerPage = cols * rows;
-            
-            const totalImages = this.images?.length || 0;
-            const totalPages = Math.max(1, Math.ceil(totalImages / imagesPerPage));
-            
-            return { 
-                cols, 
-                rows, 
-                imagesPerPage, 
-                totalPages, 
-                galleryTop, 
-                availableWidth, 
-                availableHeight 
-            };
-        };
-        
-        // Navigation methods
-        nodeType.prototype.prevPage = function() {
-            if (this.currentPage > 0) {
-                this.currentPage--;
-                this.setDirtyCanvas(true);
-            }
-        };
-        
-        nodeType.prototype.nextPage = function() {
-            const layout = this.getGalleryLayout();
-            if (this.currentPage < layout.totalPages - 1) {
-                this.currentPage++;
-                this.setDirtyCanvas(true);
-            }
-        };
-        
-        // Custom drawing
-        const onDrawForeground = nodeType.prototype.onDrawForeground;
+        // Drawing
+        const origDraw = nodeType.prototype.onDrawForeground;
         nodeType.prototype.onDrawForeground = function(ctx) {
-            if (onDrawForeground) {
-                onDrawForeground.apply(this, arguments);
-            }
-            
+            origDraw?.apply(this, arguments);
             if (this.flags.collapsed) return;
             
-            const layout = this.getGalleryLayout();
-            const galleryTop = layout.galleryTop;
-            const navY = this.size[1] - NAV_HEIGHT;
+            const L = this.getLayout();
+            const state = this.getState();
             
-            // Draw gallery background
-            ctx.fillStyle = "#1a1a1a";
-            ctx.fillRect(
-                THUMBNAIL_PADDING, 
-                galleryTop, 
-                this.size[0] - THUMBNAIL_PADDING * 2, 
-                navY - galleryTop - THUMBNAIL_PADDING
-            );
-            
-            // Loading indicator
-            if (this.isLoading) {
-                ctx.fillStyle = "#888";
-                ctx.font = "14px Arial";
+            // === TABS ===
+            const tabW = (this.size[0] - 16) / 3;
+            this._tabs = [];
+            for (let i = 0; i < 3; i++) {
+                const x = 8 + i * tabW;
+                const y = L.top;
+                this._tabs.push({ x, y, w: tabW - 2, h: TAB_HEIGHT - 2 });
+                
+                ctx.fillStyle = i === this.activeTab ? "#3a5070" : "#282828";
+                ctx.fillRect(x, y, tabW - 2, TAB_HEIGHT - 2);
+                
+                if (i === this.activeTab) {
+                    ctx.strokeStyle = "#5090d0";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, tabW - 2, TAB_HEIGHT - 2);
+                }
+                
+                const hasImg = this.tabState[i].selectedIndex >= 0;
+                ctx.fillStyle = i === this.activeTab ? "#fff" : "#999";
+                ctx.font = "12px Arial";
                 ctx.textAlign = "center";
-                ctx.fillText("Loading...", this.size[0] / 2, galleryTop + 50);
-                this.drawNavigation(ctx, layout, navY);
-                return;
+                ctx.fillText(hasImg ? `Tab ${i+1} ✓` : `Tab ${i+1}`, x + tabW/2 - 1, y + 17);
             }
             
-            // No images message
-            if (!this.images || this.images.length === 0) {
+            // === FOLDER INPUT + LOAD BUTTON ===
+            const ctrlY = L.top + TAB_HEIGHT + 4;
+            const inputW = this.size[0] - 80;
+            const btnW = 50;
+            
+            this._inputRect = { x: 8, y: ctrlY, w: inputW - 8, h: 22 };
+            this._loadBtn = { x: inputW + 4, y: ctrlY, w: btnW, h: 22 };
+            
+            // Input bg
+            ctx.fillStyle = "#222";
+            ctx.fillRect(this._inputRect.x, this._inputRect.y, this._inputRect.w, this._inputRect.h);
+            ctx.strokeStyle = "#444";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(this._inputRect.x, this._inputRect.y, this._inputRect.w, this._inputRect.h);
+            
+            // Folder path
+            const folder = this.folderWidgets?.[this.activeTab]?.value || "";
+            ctx.fillStyle = folder ? "#ccc" : "#666";
+            ctx.font = "11px Arial";
+            ctx.textAlign = "left";
+            let txt = folder || "Click to set folder...";
+            const maxTxtW = this._inputRect.w - 8;
+            while (ctx.measureText(txt).width > maxTxtW && txt.length > 5) {
+                txt = "..." + txt.slice(4);
+            }
+            ctx.fillText(txt, this._inputRect.x + 4, this._inputRect.y + 15);
+            
+            // Load button
+            ctx.fillStyle = "#4a6f9a";
+            ctx.fillRect(this._loadBtn.x, this._loadBtn.y, this._loadBtn.w, this._loadBtn.h);
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.fillText("Load", this._loadBtn.x + this._loadBtn.w/2, this._loadBtn.y + 15);
+            
+            // === GALLERY ===
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(8, L.contentTop, this.size[0] - 16, L.galleryHeight);
+            
+            if (state.isLoading) {
+                ctx.fillStyle = "#888";
+                ctx.font = "13px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("Loading...", this.size[0]/2, L.contentTop + 40);
+            } else if (!state.images || state.images.length === 0) {
                 ctx.fillStyle = "#666";
                 ctx.font = "12px Arial";
                 ctx.textAlign = "center";
-                ctx.fillText(
-                    this.folderWidget?.value ? "No images found" : "Enter folder path and click Load",
-                    this.size[0] / 2, 
-                    galleryTop + 50
-                );
-                this.drawNavigation(ctx, layout, navY);
-                return;
-            }
-            
-            // Ensure currentPage is valid
-            if (this.currentPage >= layout.totalPages) {
-                this.currentPage = layout.totalPages - 1;
-            }
-            if (this.currentPage < 0) {
-                this.currentPage = 0;
-            }
-            
-            // Draw thumbnails for current page
-            const startIdx = this.currentPage * layout.imagesPerPage;
-            const endIdx = Math.min(startIdx + layout.imagesPerPage, this.images.length);
-            
-            for (let i = startIdx; i < endIdx; i++) {
-                const imgData = this.images[i];
-                const pageIdx = i - startIdx;
-                const col = pageIdx % layout.cols;
-                const row = Math.floor(pageIdx / layout.cols);
+                ctx.fillText("No images", this.size[0]/2, L.contentTop + 40);
+            } else {
+                // Clamp page
+                if (state.currentPage >= L.pages) state.currentPage = L.pages - 1;
+                if (state.currentPage < 0) state.currentPage = 0;
                 
-                const x = THUMBNAIL_PADDING + col * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
-                const y = galleryTop + THUMBNAIL_PADDING + row * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
+                const start = state.currentPage * L.perPage;
+                const end = Math.min(start + L.perPage, state.images.length);
                 
-                // Draw selection highlight
-                if (i === this.selectedIndex) {
-                    ctx.fillStyle = "#4a9eff";
-                    ctx.fillRect(x - 3, y - 3, THUMBNAIL_SIZE + 6, THUMBNAIL_SIZE + 6);
-                }
-                
-                // Draw thumbnail background
-                ctx.fillStyle = "#333";
-                ctx.fillRect(x, y, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                
-                // Draw thumbnail image
-                const thumb = this.thumbnailCache[imgData.filename];
-                if (thumb && thumb !== false) {
-                    const scale = Math.min(
-                        THUMBNAIL_SIZE / thumb.width,
-                        THUMBNAIL_SIZE / thumb.height
-                    );
-                    const w = thumb.width * scale;
-                    const h = thumb.height * scale;
-                    const dx = x + (THUMBNAIL_SIZE - w) / 2;
-                    const dy = y + (THUMBNAIL_SIZE - h) / 2;
+                for (let i = start; i < end; i++) {
+                    const pi = i - start;
+                    const col = pi % L.cols;
+                    const row = Math.floor(pi / L.cols);
+                    const x = 8 + THUMBNAIL_PADDING + col * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
+                    const y = L.contentTop + THUMBNAIL_PADDING + row * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
                     
-                    ctx.drawImage(thumb, dx, dy, w, h);
-                } else if (thumb === null) {
-                    ctx.fillStyle = "#600";
+                    // Selection
+                    if (i === state.selectedIndex) {
+                        ctx.fillStyle = "#4a9eff";
+                        ctx.fillRect(x - 3, y - 3, THUMBNAIL_SIZE + 6, THUMBNAIL_SIZE + 6);
+                    }
+                    
+                    ctx.fillStyle = "#333";
                     ctx.fillRect(x, y, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                    ctx.fillStyle = "#fff";
-                    ctx.font = "10px Arial";
-                    ctx.textAlign = "center";
-                    ctx.fillText("Error", x + THUMBNAIL_SIZE / 2, y + THUMBNAIL_SIZE / 2 + 4);
-                } else {
-                    ctx.fillStyle = "#555";
-                    ctx.font = "10px Arial";
-                    ctx.textAlign = "center";
-                    ctx.fillText("...", x + THUMBNAIL_SIZE / 2, y + THUMBNAIL_SIZE / 2 + 4);
+                    
+                    const thumb = state.thumbnailCache[state.images[i].filename];
+                    if (thumb && thumb !== false) {
+                        const scale = Math.min(THUMBNAIL_SIZE / thumb.width, THUMBNAIL_SIZE / thumb.height);
+                        const tw = thumb.width * scale;
+                        const th = thumb.height * scale;
+                        ctx.drawImage(thumb, x + (THUMBNAIL_SIZE - tw)/2, y + (THUMBNAIL_SIZE - th)/2, tw, th);
+                    } else if (thumb === null) {
+                        ctx.fillStyle = "#500";
+                        ctx.fillRect(x, y, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+                    }
                 }
             }
             
-            // Draw navigation
-            this.drawNavigation(ctx, layout, navY);
-        };
-        
-        // Draw navigation controls
-        nodeType.prototype.drawNavigation = function(ctx, layout, navY) {
-            const centerX = this.size[0] / 2;
-            const buttonWidth = 30;
-            const buttonHeight = 22;
+            // === NAVIGATION ===
+            const cx = this.size[0] / 2;
+            this._prevBtn = { x: cx - 60, y: L.navY, w: 28, h: 22 };
+            this._nextBtn = { x: cx + 32, y: L.navY, w: 28, h: 22 };
             
-            // Store button positions for click detection
-            this._prevButtonRect = {
-                x: centerX - 80,
-                y: navY + 2,
-                w: buttonWidth,
-                h: buttonHeight
-            };
-            this._nextButtonRect = {
-                x: centerX + 50,
-                y: navY + 2,
-                w: buttonWidth,
-                h: buttonHeight
-            };
+            const canPrev = state.currentPage > 0;
+            const canNext = state.currentPage < L.pages - 1;
             
-            // Draw prev button
-            const canPrev = this.currentPage > 0;
             ctx.fillStyle = canPrev ? "#444" : "#2a2a2a";
-            ctx.fillRect(this._prevButtonRect.x, this._prevButtonRect.y, buttonWidth, buttonHeight);
+            ctx.fillRect(this._prevBtn.x, this._prevBtn.y, this._prevBtn.w, this._prevBtn.h);
             ctx.fillStyle = canPrev ? "#fff" : "#555";
             ctx.font = "14px Arial";
             ctx.textAlign = "center";
-            ctx.fillText("◀", this._prevButtonRect.x + buttonWidth / 2, this._prevButtonRect.y + 16);
+            ctx.fillText("◀", this._prevBtn.x + 14, this._prevBtn.y + 16);
             
-            // Draw page indicator
             ctx.fillStyle = "#aaa";
-            ctx.font = "12px Arial";
-            ctx.textAlign = "center";
-            const pageText = this.images?.length > 0 
-                ? `${this.currentPage + 1} / ${layout.totalPages}`
-                : "0 / 0";
-            ctx.fillText(pageText, centerX, navY + 16);
+            ctx.font = "11px Arial";
+            ctx.fillText(`${state.currentPage + 1}/${L.pages}`, cx, L.navY + 15);
             
-            // Draw next button
-            const canNext = this.currentPage < layout.totalPages - 1;
             ctx.fillStyle = canNext ? "#444" : "#2a2a2a";
-            ctx.fillRect(this._nextButtonRect.x, this._nextButtonRect.y, buttonWidth, buttonHeight);
+            ctx.fillRect(this._nextBtn.x, this._nextBtn.y, this._nextBtn.w, this._nextBtn.h);
             ctx.fillStyle = canNext ? "#fff" : "#555";
-            ctx.fillText("▶", this._nextButtonRect.x + buttonWidth / 2, this._nextButtonRect.y + 16);
+            ctx.font = "14px Arial";
+            ctx.fillText("▶", this._nextBtn.x + 14, this._nextBtn.y + 16);
             
-            // Draw image count
+            // Image count
             ctx.fillStyle = "#666";
             ctx.font = "10px Arial";
             ctx.textAlign = "right";
-            ctx.fillText(
-                `${this.images?.length || 0} images`,
-                this.size[0] - THUMBNAIL_PADDING,
-                navY + 16
-            );
+            ctx.fillText(`${state.images?.length || 0} imgs`, this.size[0] - 10, L.navY + 15);
         };
         
-        // Handle mouse clicks
-        const onMouseDown = nodeType.prototype.onMouseDown;
-        nodeType.prototype.onMouseDown = function(event, localPos, graphCanvas) {
-            if (this.flags.collapsed) return false;
+        // Mouse handling
+        const origMouse = nodeType.prototype.onMouseDown;
+        nodeType.prototype.onMouseDown = function(e, pos, canvas) {
+            if (this.flags.collapsed) return origMouse?.apply(this, arguments);
             
-            const lx = localPos[0];
-            const ly = localPos[1];
+            const [x, y] = pos;
+            const L = this.getLayout();
+            const state = this.getState();
             
-            const layout = this.getGalleryLayout();
-            const galleryTop = layout.galleryTop;
-            const navY = this.size[1] - NAV_HEIGHT;
-            
-            // Check navigation buttons
-            if (this._prevButtonRect && ly >= this._prevButtonRect.y && ly <= this._prevButtonRect.y + this._prevButtonRect.h) {
-                if (lx >= this._prevButtonRect.x && lx <= this._prevButtonRect.x + this._prevButtonRect.w) {
-                    this.prevPage();
-                    return true;
-                }
-                if (this._nextButtonRect && lx >= this._nextButtonRect.x && lx <= this._nextButtonRect.x + this._nextButtonRect.w) {
-                    this.nextPage();
-                    return true;
-                }
-            }
-            
-            // Check if in gallery area
-            if (ly < galleryTop || ly > navY - THUMBNAIL_PADDING) {
-                return onMouseDown?.apply(this, arguments);
-            }
-            
-            if (!this.images || this.images.length === 0) {
-                return onMouseDown?.apply(this, arguments);
-            }
-            
-            // Find clicked thumbnail
-            const startIdx = this.currentPage * layout.imagesPerPage;
-            const endIdx = Math.min(startIdx + layout.imagesPerPage, this.images.length);
-            
-            for (let i = startIdx; i < endIdx; i++) {
-                const pageIdx = i - startIdx;
-                const col = pageIdx % layout.cols;
-                const row = Math.floor(pageIdx / layout.cols);
-                
-                const x = THUMBNAIL_PADDING + col * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
-                const y = galleryTop + THUMBNAIL_PADDING + row * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
-                
-                if (lx >= x && lx <= x + THUMBNAIL_SIZE && 
-                    ly >= y && ly <= y + THUMBNAIL_SIZE) {
-                    
-                    this.selectedIndex = i;
-                    const filename = this.images[i].filename;
-                    
-                    console.log("[ImageFolderPicker] Selected image:", filename);
-                    
-                    if (this.selectedWidget) {
-                        this.selectedWidget.value = filename;
+            // Tab clicks
+            if (this._tabs) {
+                for (let i = 0; i < 3; i++) {
+                    const t = this._tabs[i];
+                    if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h) {
+                        this.activeTab = i;
+                        this.setDirtyCanvas(true);
+                        return true;
                     }
-                    
-                    this.setDirtyCanvas(true);
-                    
-                    if (this.graph) {
-                        this.graph.change();
+                }
+            }
+            
+            // Input click
+            if (this._inputRect) {
+                const r = this._inputRect;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    const fw = this.folderWidgets?.[this.activeTab];
+                    const val = prompt("Enter folder path:", fw?.value || "");
+                    if (val !== null && fw) {
+                        fw.value = val;
+                        this.setDirtyCanvas(true);
                     }
-                    
                     return true;
                 }
             }
             
-            return true; // Consume to prevent node dragging
-        };
-        
-        // Handle mouse wheel for page navigation
-        const onMouseWheel = nodeType.prototype.onMouseWheel;
-        nodeType.prototype.onMouseWheel = function(event, localPos, graphCanvas) {
-            if (this.flags.collapsed) return false;
-            
-            const layout = this.getGalleryLayout();
-            const galleryTop = layout.galleryTop;
-            const ly = localPos ? localPos[1] : 0;
-            
-            // Check if in gallery area
-            if (ly >= galleryTop && ly <= this.size[1] && this.images?.length > 0 && layout.totalPages > 1) {
-                let delta = 0;
-                if (event.deltaY !== undefined) {
-                    delta = event.deltaY;
-                } else if (event.wheelDelta !== undefined) {
-                    delta = -event.wheelDelta;
+            // Load button
+            if (this._loadBtn) {
+                const r = this._loadBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    this.loadImages(this.activeTab);
+                    return true;
                 }
-                
-                if (delta > 0) {
-                    this.nextPage();
-                } else if (delta < 0) {
-                    this.prevPage();
+            }
+            
+            // Prev/Next
+            if (this._prevBtn) {
+                const r = this._prevBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    if (state.currentPage > 0) { state.currentPage--; this.setDirtyCanvas(true); }
+                    return true;
                 }
+            }
+            if (this._nextBtn) {
+                const r = this._nextBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    if (state.currentPage < L.pages - 1) { state.currentPage++; this.setDirtyCanvas(true); }
+                    return true;
+                }
+            }
+            
+            // Thumbnail clicks
+            if (y >= L.contentTop && y < L.navY && state.images?.length > 0) {
+                const start = state.currentPage * L.perPage;
+                const end = Math.min(start + L.perPage, state.images.length);
                 
-                // Stop event propagation
-                event.stopPropagation && event.stopPropagation();
-                event.preventDefault && event.preventDefault();
-                event.stopImmediatePropagation && event.stopImmediatePropagation();
-                event.stopped = true;
-                
+                for (let i = start; i < end; i++) {
+                    const pi = i - start;
+                    const col = pi % L.cols;
+                    const row = Math.floor(pi / L.cols);
+                    const tx = 8 + THUMBNAIL_PADDING + col * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
+                    const ty = L.contentTop + THUMBNAIL_PADDING + row * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
+                    
+                    if (x >= tx && x <= tx + THUMBNAIL_SIZE && y >= ty && y <= ty + THUMBNAIL_SIZE) {
+                        state.selectedIndex = i;
+                        const fn = state.images[i].filename;
+                        const sw = this.selectedWidgets?.[this.activeTab];
+                        if (sw) sw.value = fn;
+                        this.setDirtyCanvas(true);
+                        this.graph?.change();
+                        return true;
+                    }
+                }
                 return true;
             }
             
-            return onMouseWheel?.apply(this, arguments);
+            return origMouse?.apply(this, arguments);
         };
         
-        // Serialize state
-        const onSerialize = nodeType.prototype.onSerialize;
-        nodeType.prototype.onSerialize = function(info) {
-            if (onSerialize) {
-                onSerialize.apply(this, arguments);
+        // Mouse wheel
+        const origWheel = nodeType.prototype.onMouseWheel;
+        nodeType.prototype.onMouseWheel = function(e, pos) {
+            if (this.flags.collapsed) return;
+            
+            const L = this.getLayout();
+            const state = this.getState();
+            const y = pos[1];
+            
+            if (y >= L.contentTop && y < L.navY && state.images?.length > 0 && L.pages > 1) {
+                const d = e.deltaY > 0 ? 1 : -1;
+                state.currentPage = Math.max(0, Math.min(L.pages - 1, state.currentPage + d));
+                this.setDirtyCanvas(true);
+                e.stopPropagation?.();
+                e.preventDefault?.();
+                e.stopped = true;
+                return true;
             }
             
-            info.ifp_selectedIndex = this.selectedIndex;
-            info.ifp_currentPage = this.currentPage;
+            return origWheel?.apply(this, arguments);
         };
         
-        // Restore state
-        const onConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function(info) {
-            if (onConfigure) {
-                onConfigure.apply(this, arguments);
+        // Serialize
+        const origSer = nodeType.prototype.onSerialize;
+        nodeType.prototype.onSerialize = function(o) {
+            origSer?.apply(this, arguments);
+            o.ifp_tab = this.activeTab;
+            o.ifp_states = this.tabState.map(s => ({ sel: s.selectedIndex, page: s.currentPage }));
+        };
+        
+        // Configure
+        const origConf = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function(o) {
+            origConf?.apply(this, arguments);
+            this.activeTab = o.ifp_tab ?? 0;
+            if (o.ifp_states) {
+                for (let i = 0; i < 3; i++) {
+                    if (o.ifp_states[i]) {
+                        this.tabState[i].selectedIndex = o.ifp_states[i].sel ?? -1;
+                        this.tabState[i].currentPage = o.ifp_states[i].page ?? 0;
+                    }
+                }
             }
-            
-            this.selectedIndex = info.ifp_selectedIndex ?? -1;
-            this.currentPage = info.ifp_currentPage ?? 0;
-            
-            setTimeout(() => {
-                this.setupWidgets();
-            }, 100);
+            setTimeout(() => this.setupWidgets(), 100);
         };
     }
 });

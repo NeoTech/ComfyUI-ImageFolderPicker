@@ -1,6 +1,7 @@
 """
 Image Folder Picker Node for ComfyUI
 Allows browsing a folder and selecting an image from thumbnails
+Supports 3 tabs for loading 3 different images
 """
 
 import os
@@ -13,8 +14,8 @@ import folder_paths
 
 class ImageFolderPicker:
     """
-    A ComfyUI node that displays images from a folder as selectable thumbnails.
-    Outputs the selected image and its alpha channel as a mask.
+    A ComfyUI node that displays images from folders as selectable thumbnails.
+    Has 3 tabs, each outputting a separate image.
     """
     
     VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif'}
@@ -23,100 +24,101 @@ class ImageFolderPicker:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "folder": ("STRING", {
+                "folder1": ("STRING", {
                     "default": "",
                     "multiline": False,
-                    "placeholder": "Enter full folder path (e.g. C:\\Images)"
+                    "placeholder": "Folder path for Tab 1"
+                }),
+                "folder2": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "placeholder": "Folder path for Tab 2"
+                }),
+                "folder3": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "placeholder": "Folder path for Tab 3"
                 }),
             },
             "optional": {
-                "selected_image": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                }),
+                "selected_image1": ("STRING", {"default": ""}),
+                "selected_image2": ("STRING", {"default": ""}),
+                "selected_image3": ("STRING", {"default": ""}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             }
         }
     
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "INT")
-    RETURN_NAMES = ("image", "mask", "image_path", "image_count")
-    FUNCTION = "load_selected_image"
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE")
+    RETURN_NAMES = ("image1", "image2", "image3")
+    FUNCTION = "load_selected_images"
     CATEGORY = "image"
-    DESCRIPTION = "Browse a folder and pick an image from thumbnails. Outputs the selected image and its alpha channel as mask."
+    DESCRIPTION = "Browse folders and pick images from thumbnails. Has 3 tabs, each outputting a separate image."
     
-    def load_selected_image(self, folder, selected_image, unique_id=None):
-        """Load the selected image and extract its alpha channel as mask."""
-        
-        # Count images in folder
-        image_count = 0
-        if folder and os.path.isdir(folder):
-            image_count = len([f for f in os.listdir(folder) 
-                             if os.path.splitext(f)[1].lower() in self.VALID_EXTENSIONS])
-        
-        # Handle no selection
+    def load_image(self, folder, selected_image):
+        """Load a single image and return tensor."""
         if not selected_image or not folder:
-            # Return empty tensors if no image selected
-            empty_image = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
-            empty_mask = torch.zeros((1, 64, 64), dtype=torch.float32)
-            return (empty_image, empty_mask, "", image_count)
+            return torch.zeros((1, 64, 64, 3), dtype=torch.float32)
         
         image_path = os.path.join(folder, selected_image)
         
         if not os.path.exists(image_path):
-            raise ValueError(f"Image not found: {image_path}")
+            return torch.zeros((1, 64, 64, 3), dtype=torch.float32)
         
-        # Load image using PIL
-        img = Image.open(image_path)
+        try:
+            img = Image.open(image_path)
+            
+            if hasattr(img, 'n_frames') and img.n_frames > 1:
+                img = img.convert('RGBA')
+            
+            img = ImageOps.exif_transpose(img)
+            
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            image_np = np.array(img).astype(np.float32) / 255.0
+            image_tensor = torch.from_numpy(image_np).unsqueeze(0)
+            
+            return image_tensor
+        except Exception as e:
+            print(f"[ImageFolderPicker] Error loading {image_path}: {e}")
+            return torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+    
+    def load_selected_images(self, folder1, folder2, folder3, 
+                             selected_image1="", selected_image2="", selected_image3="",
+                             unique_id=None):
+        """Load all selected images."""
+        image1 = self.load_image(folder1, selected_image1)
+        image2 = self.load_image(folder2, selected_image2)
+        image3 = self.load_image(folder3, selected_image3)
         
-        # Handle animated images (GIF) - take first frame
-        if hasattr(img, 'n_frames') and img.n_frames > 1:
-            img = img.convert('RGBA')
-        
-        # Preserve EXIF orientation
-        img = ImageOps.exif_transpose(img)
-        
-        # Extract mask from alpha channel if present
-        if img.mode == 'RGBA':
-            # Get alpha channel as mask (inverted: white = masked area)
-            alpha = img.split()[3]
-            mask = 1.0 - (np.array(alpha).astype(np.float32) / 255.0)
-            mask = torch.from_numpy(mask).unsqueeze(0)
-        else:
-            # No alpha channel - create empty mask
-            mask = torch.zeros((1, img.height, img.width), dtype=torch.float32)
-        
-        # Convert image to RGB
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # Convert to tensor [B, H, W, C] format
-        image_np = np.array(img).astype(np.float32) / 255.0
-        image_tensor = torch.from_numpy(image_np).unsqueeze(0)
-        
-        return (image_tensor, mask, image_path, image_count)
+        return (image1, image2, image3)
     
     @classmethod
-    def IS_CHANGED(cls, folder="", selected_image="", **kwargs):
-        """Return hash of selected image for cache invalidation."""
-        if not selected_image or not folder:
-            return float("NaN")
+    def IS_CHANGED(cls, folder1="", folder2="", folder3="",
+                   selected_image1="", selected_image2="", selected_image3="", **kwargs):
+        """Return hash for cache invalidation."""
+        parts = []
         
-        image_path = os.path.join(folder, selected_image)
+        for folder, selected in [(folder1, selected_image1), (folder2, selected_image2), (folder3, selected_image3)]:
+            if selected and folder:
+                image_path = os.path.join(folder, selected)
+                if os.path.exists(image_path):
+                    stat = os.stat(image_path)
+                    parts.append(f"{image_path}_{stat.st_mtime}_{stat.st_size}")
         
-        if os.path.exists(image_path):
-            # Hash file modification time and size for efficiency
-            stat = os.stat(image_path)
-            return f"{image_path}_{stat.st_mtime}_{stat.st_size}"
-        
+        if parts:
+            return "_".join(parts)
         return float("NaN")
     
     @classmethod
-    def VALIDATE_INPUTS(cls, folder="", selected_image="", **kwargs):
-        """Validate that the selected image exists."""
-        if selected_image and folder:
-            path = os.path.join(folder, selected_image)
-            if not os.path.exists(path):
-                return f"Image not found: {path}"
+    def VALIDATE_INPUTS(cls, folder1="", folder2="", folder3="",
+                        selected_image1="", selected_image2="", selected_image3="", **kwargs):
+        """Validate that selected images exist."""
+        for folder, selected, tab in [(folder1, selected_image1, 1), (folder2, selected_image2, 2), (folder3, selected_image3, 3)]:
+            if selected and folder:
+                path = os.path.join(folder, selected)
+                if not os.path.exists(path):
+                    return f"Tab {tab}: Image not found: {path}"
         return True
