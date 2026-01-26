@@ -107,6 +107,9 @@ app.registerExtension({
             // Hide folder navigation toggle
             this.hideFolders = false;
             
+            // Size picker menu state
+            this.showSizeMenu = false;
+            
             // State for each tab
             this.tabState = [
                 { images: [], subfolders: [], parentFolder: '', thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name', folderOverride: '' },
@@ -415,14 +418,14 @@ app.registerExtension({
             const thumbSize = this.thumbnailSize || DEFAULT_THUMBNAIL_SIZE;
             const sizeBtnW = 50;
             this._thumbSizeBtn = { x: this.size[0] - sizeBtnW - 12, y: pathBarY, w: sizeBtnW, h: 20 };
-            ctx.fillStyle = "#333";
+            ctx.fillStyle = this.showSizeMenu ? "#4a4a4a" : "#333";
             ctx.fillRect(this._thumbSizeBtn.x, this._thumbSizeBtn.y, this._thumbSizeBtn.w, this._thumbSizeBtn.h);
-            ctx.strokeStyle = "#555";
+            ctx.strokeStyle = this.showSizeMenu ? "#6a9fca" : "#555";
             ctx.strokeRect(this._thumbSizeBtn.x, this._thumbSizeBtn.y, this._thumbSizeBtn.w, this._thumbSizeBtn.h);
             ctx.fillStyle = "#ccc";
             ctx.font = "10px Arial";
             ctx.textAlign = "center";
-            ctx.fillText(`${thumbSize}px`, this._thumbSizeBtn.x + sizeBtnW/2, this._thumbSizeBtn.y + 14);
+            ctx.fillText(`${thumbSize}px ▼`, this._thumbSizeBtn.x + sizeBtnW/2, this._thumbSizeBtn.y + 14);
             
             // Folder visibility toggle button (next to size button)
             const folderBtnW = 24;
@@ -620,6 +623,60 @@ app.registerExtension({
                 ? `${L.totalFolders} 📁 ${L.totalImages} imgs` 
                 : `${L.totalImages} imgs`;
             ctx.fillText(countText, this.size[0] - 10, L.navY + 15);
+            
+            // === SIZE PICKER MENU (drawn last to overlay everything) ===
+            if (this.showSizeMenu && this._thumbSizeBtn) {
+                const menuX = this._thumbSizeBtn.x;
+                const menuY = this._thumbSizeBtn.y + this._thumbSizeBtn.h + 2;
+                const menuW = this._thumbSizeBtn.w;
+                const itemH = 20;
+                const menuH = THUMBNAIL_SIZES.length * itemH;
+                
+                // Store menu rect for click detection
+                this._sizeMenuRect = { x: menuX, y: menuY, w: menuW, h: menuH };
+                this._sizeMenuItems = [];
+                
+                // Menu background with border
+                ctx.fillStyle = "#2a2a2a";
+                ctx.fillRect(menuX, menuY, menuW, menuH);
+                ctx.strokeStyle = "#6a9fca";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(menuX, menuY, menuW, menuH);
+                
+                // Draw each size option
+                for (let i = 0; i < THUMBNAIL_SIZES.length; i++) {
+                    const size = THUMBNAIL_SIZES[i];
+                    const itemY = menuY + i * itemH;
+                    const isSelected = size === this.thumbnailSize;
+                    
+                    // Store item rect
+                    this._sizeMenuItems.push({ x: menuX, y: itemY, w: menuW, h: itemH, size: size });
+                    
+                    // Highlight selected
+                    if (isSelected) {
+                        ctx.fillStyle = "#4a6f9a";
+                        ctx.fillRect(menuX + 1, itemY, menuW - 2, itemH);
+                    }
+                    
+                    // Item text
+                    ctx.fillStyle = isSelected ? "#fff" : "#ccc";
+                    ctx.font = "10px Arial";
+                    ctx.textAlign = "center";
+                    ctx.fillText(`${size}px`, menuX + menuW/2, itemY + 14);
+                    
+                    // Separator line (except last)
+                    if (i < THUMBNAIL_SIZES.length - 1) {
+                        ctx.strokeStyle = "#444";
+                        ctx.beginPath();
+                        ctx.moveTo(menuX + 4, itemY + itemH);
+                        ctx.lineTo(menuX + menuW - 4, itemY + itemH);
+                        ctx.stroke();
+                    }
+                }
+            } else {
+                this._sizeMenuRect = null;
+                this._sizeMenuItems = null;
+            }
         };
         
         // Mouse handling
@@ -734,20 +791,45 @@ app.registerExtension({
                 }
             }
             
-            // Thumbnail size button - cycle through sizes
+            // Size menu item clicks (check first when menu is open)
+            if (this.showSizeMenu && this._sizeMenuItems) {
+                for (const item of this._sizeMenuItems) {
+                    if (x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h) {
+                        if (this.thumbnailSize !== item.size) {
+                            this.thumbnailSize = item.size;
+                            // Clear all thumbnail caches to reload with new size
+                            for (let i = 0; i < 3; i++) {
+                                this.tabState[i].thumbnailCache = {};
+                                if (this.tabState[i].images.length > 0) {
+                                    this.loadThumbnails(i);
+                                }
+                            }
+                        }
+                        this.showSizeMenu = false;
+                        this.setDirtyCanvas(true);
+                        return true;
+                    }
+                }
+                // Click outside menu closes it
+                if (this._sizeMenuRect) {
+                    const mr = this._sizeMenuRect;
+                    if (!(x >= mr.x && x <= mr.x + mr.w && y >= mr.y && y <= mr.y + mr.h)) {
+                        // Not in menu - check if on button (toggle) or elsewhere (close)
+                        const r = this._thumbSizeBtn;
+                        if (!(x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)) {
+                            this.showSizeMenu = false;
+                            this.setDirtyCanvas(true);
+                            // Don't return - let other click handlers process
+                        }
+                    }
+                }
+            }
+            
+            // Thumbnail size button - toggle menu
             if (this._thumbSizeBtn) {
                 const r = this._thumbSizeBtn;
                 if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
-                    const currentIdx = THUMBNAIL_SIZES.indexOf(this.thumbnailSize);
-                    const nextIdx = (currentIdx + 1) % THUMBNAIL_SIZES.length;
-                    this.thumbnailSize = THUMBNAIL_SIZES[nextIdx];
-                    // Clear all thumbnail caches to reload with new size
-                    for (let i = 0; i < 3; i++) {
-                        this.tabState[i].thumbnailCache = {};
-                        if (this.tabState[i].images.length > 0) {
-                            this.loadThumbnails(i);
-                        }
-                    }
+                    this.showSizeMenu = !this.showSizeMenu;
                     this.setDirtyCanvas(true);
                     return true;
                 }

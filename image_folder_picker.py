@@ -131,15 +131,7 @@ class ImageFolderPicker:
     def VALIDATE_INPUTS(cls, folder1="", folder2="", folder3="",
                         folder1_input=None, folder2_input=None, folder3_input=None,
                         selected_image1="", selected_image2="", selected_image3="", **kwargs):
-        """Validate that selected images exist."""
-        # Use input connections if provided
-        f1 = folder1_input if folder1_input else folder1
-        f2 = folder2_input if folder2_input else folder2
-        f3 = folder3_input if folder3_input else folder3
-        
-        for folder, selected, tab in [(f1, selected_image1, 1), (f2, selected_image2, 2), (f3, selected_image3, 3)]:
-            if selected and folder:
-                path = os.path.join(folder, selected)
-                if not os.path.exists(path):
-                    return f"Tab {tab}: Image not found: {path}"
+        """Validate inputs - we allow missing images (they return empty tensor)."""
+        # Always return True - missing images will just return blank tensors
+        # This allows the node to work even if paths are temporarily invalid
         return True
