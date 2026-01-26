@@ -93,7 +93,7 @@ def register_routes():
     
     @routes.get("/imagefolderpicker/list")
     async def list_folder_images(request):
-        """List all images in a folder with optional sorting."""
+        """List all images and subfolders in a folder with optional sorting."""
         folder = request.rel_url.query.get("folder", "")
         sort_by = request.rel_url.query.get("sort", "name")  # name, date_asc, date_desc
         
@@ -104,27 +104,58 @@ def register_routes():
             return web.json_response({"error": "Invalid folder path"}, status=400)
         
         images = []
+        subfolders = []
         
         try:
             for filename in os.listdir(folder):
+                file_path = os.path.join(folder, filename)
+                
+                # Check for subfolders (skip hidden folders)
+                if os.path.isdir(file_path) and not filename.startswith('.'):
+                    stat = os.stat(file_path)
+                    subfolders.append({
+                        "name": filename,
+                        "path": file_path,
+                        "modified": stat.st_mtime,
+                        "type": "folder"
+                    })
+                    continue
+                
                 ext = os.path.splitext(filename)[1].lower()
                 if ext in VALID_EXTENSIONS:
-                    file_path = os.path.join(folder, filename)
                     if os.path.isfile(file_path):
                         stat = os.stat(file_path)
+                        # Get image dimensions
+                        width, height = 0, 0
+                        try:
+                            with Image.open(file_path) as img:
+                                width, height = img.size
+                        except:
+                            pass
                         images.append({
                             "filename": filename,
                             "size": stat.st_size,
                             "modified": stat.st_mtime,
+                            "width": width,
+                            "height": height,
+                            "type": "image"
                         })
             
-            # Sort based on parameter
+            # Sort subfolders by name
+            subfolders.sort(key=lambda x: x["name"].lower())
+            
+            # Sort images based on parameter
             if sort_by == "date_asc":
                 images.sort(key=lambda x: x["modified"])
             elif sort_by == "date_desc":
                 images.sort(key=lambda x: x["modified"], reverse=True)
             else:  # Default: name (alphabetical)
                 images.sort(key=lambda x: x["filename"].lower())
+            
+            # Get parent folder path
+            parent = os.path.dirname(folder)
+            if parent == folder:  # At root
+                parent = ""
                 
         except PermissionError:
             return web.json_response({"error": "Permission denied"}, status=403)
@@ -133,6 +164,8 @@ def register_routes():
         
         return web.json_response({
             "folder": folder,
+            "parent": parent,
+            "subfolders": subfolders,
             "images": images,
             "count": len(images),
             "sort": sort_by
