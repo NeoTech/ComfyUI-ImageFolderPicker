@@ -10,26 +10,31 @@ from PIL import Image
 
 VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif'}
 THUMBNAIL_SIZE = (128, 128)
+THUMBNAIL_SIZES = {128, 256, 346, 478, 512}  # Allowed thumbnail sizes
 THUMBS_FOLDER = '.thumbs'
 
 
-def get_thumbnail_path(folder, filename):
+def get_thumbnail_path(folder, filename, size=128):
     """Get the path where a thumbnail should be stored."""
     thumbs_dir = os.path.join(folder, THUMBS_FOLDER)
     
     # Create hash of original filename for thumbnail name
     name, ext = os.path.splitext(filename)
-    thumb_filename = f"{name}_thumb.jpg"
+    # Include size in filename for different sizes
+    size_suffix = f"_{size}" if size != 128 else ""
+    thumb_filename = f"{name}_thumb{size_suffix}.jpg"
     
     return thumbs_dir, os.path.join(thumbs_dir, thumb_filename)
 
 
-def generate_thumbnail(image_path, thumb_path):
+def generate_thumbnail(image_path, thumb_path, size=128):
     """Generate a thumbnail for an image and save it."""
     try:
         # Create thumbnails directory if needed
         thumbs_dir = os.path.dirname(thumb_path)
         os.makedirs(thumbs_dir, exist_ok=True)
+        
+        thumb_size = (size, size)
         
         # Open and create thumbnail
         with Image.open(image_path) as img:
@@ -52,7 +57,7 @@ def generate_thumbnail(image_path, thumb_path):
                 img = img.convert('RGB')
             
             # Create thumbnail maintaining aspect ratio
-            img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            img.thumbnail(thumb_size, Image.Resampling.LANCZOS)
             
             # Save as JPEG
             img.save(thumb_path, 'JPEG', quality=85)
@@ -88,8 +93,9 @@ def register_routes():
     
     @routes.get("/imagefolderpicker/list")
     async def list_folder_images(request):
-        """List all images in a folder."""
+        """List all images in a folder with optional sorting."""
         folder = request.rel_url.query.get("folder", "")
+        sort_by = request.rel_url.query.get("sort", "name")  # name, date_asc, date_desc
         
         if not folder:
             return web.json_response({"error": "No folder specified"}, status=400)
@@ -100,7 +106,7 @@ def register_routes():
         images = []
         
         try:
-            for filename in sorted(os.listdir(folder)):
+            for filename in os.listdir(folder):
                 ext = os.path.splitext(filename)[1].lower()
                 if ext in VALID_EXTENSIONS:
                     file_path = os.path.join(folder, filename)
@@ -111,6 +117,15 @@ def register_routes():
                             "size": stat.st_size,
                             "modified": stat.st_mtime,
                         })
+            
+            # Sort based on parameter
+            if sort_by == "date_asc":
+                images.sort(key=lambda x: x["modified"])
+            elif sort_by == "date_desc":
+                images.sort(key=lambda x: x["modified"], reverse=True)
+            else:  # Default: name (alphabetical)
+                images.sort(key=lambda x: x["filename"].lower())
+                
         except PermissionError:
             return web.json_response({"error": "Permission denied"}, status=403)
         except Exception as e:
@@ -119,7 +134,8 @@ def register_routes():
         return web.json_response({
             "folder": folder,
             "images": images,
-            "count": len(images)
+            "count": len(images),
+            "sort": sort_by
         })
     
     @routes.get("/imagefolderpicker/thumbnail")
@@ -127,6 +143,15 @@ def register_routes():
         """Get or generate a thumbnail for an image."""
         folder = request.rel_url.query.get("folder", "")
         filename = request.rel_url.query.get("filename", "")
+        size_str = request.rel_url.query.get("size", "128")
+        
+        # Parse and validate size
+        try:
+            size = int(size_str)
+            if size not in THUMBNAIL_SIZES:
+                size = 128  # Default to 128 if invalid
+        except ValueError:
+            size = 128
         
         if not folder or not filename:
             return web.json_response({"error": "Missing folder or filename"}, status=400)
@@ -142,12 +167,12 @@ def register_routes():
         if not real_image.startswith(real_folder):
             return web.json_response({"error": "Invalid path"}, status=403)
         
-        # Get thumbnail path
-        _, thumb_path = get_thumbnail_path(folder, filename)
+        # Get thumbnail path with size
+        _, thumb_path = get_thumbnail_path(folder, filename, size)
         
         # Generate thumbnail if needed
         if not is_thumbnail_valid(image_path, thumb_path):
-            if not generate_thumbnail(image_path, thumb_path):
+            if not generate_thumbnail(image_path, thumb_path, size):
                 # Fallback: return original image resized on-the-fly
                 try:
                     with Image.open(image_path) as img:
@@ -155,7 +180,7 @@ def register_routes():
                         img = ImageOps.exif_transpose(img)
                         if img.mode != 'RGB':
                             img = img.convert('RGB')
-                        img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+                        img.thumbnail((size, size), Image.Resampling.LANCZOS)
                         
                         buffer = BytesIO()
                         img.save(buffer, 'JPEG', quality=85)

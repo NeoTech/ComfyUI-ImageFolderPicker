@@ -8,11 +8,81 @@ import { api } from "../../scripts/api.js";
 
 console.log("[ImageFolderPicker] Extension loading...");
 
-const THUMBNAIL_SIZE = 80;
+// Thumbnail size options
+const THUMBNAIL_SIZES = [128, 256, 346, 478, 512];
+const DEFAULT_THUMBNAIL_SIZE = 128;
+
 const THUMBNAIL_PADDING = 6;
 const TAB_HEIGHT = 26;
 const NAV_HEIGHT = 26;
 const CONTROLS_HEIGHT = 30;
+const PATH_BAR_HEIGHT = 26;
+
+// Global preview overlay element
+let previewOverlay = null;
+
+function showPreviewOverlay(imageSrc, filename, onClose) {
+    // Create overlay if doesn't exist
+    if (!previewOverlay) {
+        previewOverlay = document.createElement('div');
+        previewOverlay.id = 'ifp-preview-overlay';
+        previewOverlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.92);
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        `;
+        document.body.appendChild(previewOverlay);
+    }
+    
+    previewOverlay.innerHTML = `
+        <div style="position: absolute; top: 15px; right: 20px; width: 36px; height: 36px; 
+                    background: #c44; border-radius: 4px; display: flex; align-items: center; 
+                    justify-content: center; cursor: pointer; font-size: 20px; color: white;
+                    font-weight: bold;" id="ifp-close-btn">✕</div>
+        <img src="${imageSrc}" style="max-width: 90vw; max-height: 85vh; object-fit: contain; 
+             border: 3px solid #4a9eff; border-radius: 4px;" />
+        <div style="color: #ccc; font-size: 14px; margin-top: 12px; font-family: Arial, sans-serif;">
+            ${filename}
+        </div>
+    `;
+    
+    previewOverlay.style.display = 'flex';
+    
+    // Close handlers
+    const closeHandler = (e) => {
+        if (e.target === previewOverlay || e.target.id === 'ifp-close-btn' || e.target.closest('#ifp-close-btn')) {
+            hidePreviewOverlay();
+            onClose?.();
+        }
+    };
+    
+    const keyHandler = (e) => {
+        if (e.key === 'Escape') {
+            hidePreviewOverlay();
+            onClose?.();
+            document.removeEventListener('keydown', keyHandler);
+        }
+    };
+    
+    previewOverlay.onclick = closeHandler;
+    document.addEventListener('keydown', keyHandler);
+}
+
+function hidePreviewOverlay() {
+    if (previewOverlay) {
+        previewOverlay.style.display = 'none';
+        previewOverlay.onclick = null;
+    }
+}
 
 app.registerExtension({
     name: "Comfy.ImageFolderPicker",
@@ -30,11 +100,14 @@ app.registerExtension({
             // Current active tab (0, 1, 2)
             this.activeTab = 0;
             
+            // Thumbnail size (global setting)
+            this.thumbnailSize = DEFAULT_THUMBNAIL_SIZE;
+            
             // State for each tab
             this.tabState = [
-                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false },
-                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false },
-                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false }
+                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name' },
+                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name' },
+                { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name' }
             ];
             
             // Set initial size - must be large enough
@@ -79,9 +152,47 @@ app.registerExtension({
             return this.tabState?.[this.activeTab] || { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false };
         };
         
+        // Helper to get folder path - checks connected input first, then widget value
+        nodeType.prototype.getFolderPath = function(tabIdx) {
+            // Check if there's a connected input for this tab
+            const inputName = `folder${tabIdx + 1}_input`;
+            const inputIdx = this.inputs?.findIndex(inp => inp.name === inputName);
+            
+            if (inputIdx >= 0 && this.inputs[inputIdx]?.link != null) {
+                // There's a connection - get the value from connected node
+                const linkId = this.inputs[inputIdx].link;
+                const link = app.graph.links[linkId];
+                if (link) {
+                    const originNode = app.graph.getNodeById(link.origin_id);
+                    if (originNode) {
+                        // Try to get the output value - check widgets first
+                        const originOutput = originNode.outputs?.[link.origin_slot];
+                        
+                        // For String/primitive nodes, look for a value widget
+                        const valueWidget = originNode.widgets?.find(w => 
+                            w.name === "value" || w.name === "text" || w.name === "string"
+                        );
+                        if (valueWidget?.value) {
+                            return valueWidget.value;
+                        }
+                        
+                        // Also check if origin node has getOutputData (executed value)
+                        if (typeof originNode.getOutputData === 'function') {
+                            const data = originNode.getOutputData(link.origin_slot);
+                            if (data) return data;
+                        }
+                    }
+                }
+            }
+            
+            // Fall back to widget value
+            return this.folderWidgets?.[tabIdx]?.value || "";
+        };
+        
         nodeType.prototype.loadImages = async function(tabIdx) {
-            const folder = this.folderWidgets?.[tabIdx]?.value;
+            const folder = this.getFolderPath(tabIdx);
             const state = this.tabState[tabIdx];
+            const sortOrder = state.sortOrder || 'name';
             
             if (!folder) {
                 state.images = [];
@@ -94,7 +205,7 @@ app.registerExtension({
             this.setDirtyCanvas(true);
             
             try {
-                const resp = await api.fetchApi(`/imagefolderpicker/list?folder=${encodeURIComponent(folder)}`);
+                const resp = await api.fetchApi(`/imagefolderpicker/list?folder=${encodeURIComponent(folder)}&sort=${encodeURIComponent(sortOrder)}`);
                 if (resp.ok) {
                     const data = await resp.json();
                     state.images = data.images || [];
@@ -121,8 +232,9 @@ app.registerExtension({
         };
         
         nodeType.prototype.loadThumbnails = function(tabIdx) {
-            const folder = this.folderWidgets?.[tabIdx]?.value;
+            const folder = this.getFolderPath(tabIdx);
             const state = this.tabState[tabIdx];
+            const thumbSize = this.thumbnailSize || DEFAULT_THUMBNAIL_SIZE;
             if (!folder) return;
             
             const node = this;
@@ -133,28 +245,29 @@ app.registerExtension({
                 const image = new Image();
                 image.onload = () => { state.thumbnailCache[img.filename] = image; node.setDirtyCanvas(true); };
                 image.onerror = () => { state.thumbnailCache[img.filename] = null; node.setDirtyCanvas(true); };
-                image.src = `/imagefolderpicker/thumbnail?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(img.filename)}`;
+                image.src = `/imagefolderpicker/thumbnail?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(img.filename)}&size=${thumbSize}`;
             }
         };
         
         nodeType.prototype.getLayout = function() {
             // Calculate layout dimensions
+            const thumbSize = this.thumbnailSize || DEFAULT_THUMBNAIL_SIZE;
             const outputH = (this.outputs?.length || 0) * 20 + 6;
             const top = 30 + outputH; // Header + outputs
-            const contentTop = top + TAB_HEIGHT + CONTROLS_HEIGHT;
+            const contentTop = top + TAB_HEIGHT + PATH_BAR_HEIGHT + CONTROLS_HEIGHT;
             const navY = this.size[1] - NAV_HEIGHT - 4;
             const galleryHeight = navY - contentTop - 8;
             
             const w = this.size[0] - 16;
-            const cols = Math.max(1, Math.floor(w / (THUMBNAIL_SIZE + THUMBNAIL_PADDING)));
-            const rows = Math.max(1, Math.floor(galleryHeight / (THUMBNAIL_SIZE + THUMBNAIL_PADDING)));
+            const cols = Math.max(1, Math.floor(w / (thumbSize + THUMBNAIL_PADDING)));
+            const rows = Math.max(1, Math.floor(galleryHeight / (thumbSize + THUMBNAIL_PADDING)));
             const perPage = cols * rows;
             
             const state = this.getState();
             const total = state.images?.length || 0;
             const pages = Math.max(1, Math.ceil(total / perPage));
             
-            return { top, contentTop, navY, galleryHeight, cols, rows, perPage, pages, w };
+            return { top, contentTop, navY, galleryHeight, cols, rows, perPage, pages, w, thumbSize };
         };
         
         // Drawing
@@ -205,8 +318,8 @@ app.registerExtension({
             ctx.lineWidth = 1;
             ctx.strokeRect(this._inputRect.x, this._inputRect.y, this._inputRect.w, this._inputRect.h);
             
-            // Folder path
-            const folder = this.folderWidgets?.[this.activeTab]?.value || "";
+            // Folder path (check connected input first)
+            const folder = this.getFolderPath(this.activeTab);
             ctx.fillStyle = folder ? "#ccc" : "#666";
             ctx.font = "11px Arial";
             ctx.textAlign = "left";
@@ -223,6 +336,54 @@ app.registerExtension({
             ctx.fillStyle = "#fff";
             ctx.textAlign = "center";
             ctx.fillText("Load", this._loadBtn.x + this._loadBtn.w/2, this._loadBtn.y + 15);
+            
+            // === PATH BAR WITH SORTING + SIZE ===
+            const pathBarY = L.top + TAB_HEIGHT + CONTROLS_HEIGHT + 4;
+            const sortOrder = state.sortOrder || 'name';
+            
+            // Sort by Name button (Az)
+            const sortBtnW = 28;
+            this._sortNameBtn = { x: 8, y: pathBarY, w: sortBtnW, h: 20 };
+            ctx.fillStyle = sortOrder === 'name' ? "#4a6f9a" : "#333";
+            ctx.fillRect(this._sortNameBtn.x, this._sortNameBtn.y, this._sortNameBtn.w, this._sortNameBtn.h);
+            ctx.strokeStyle = sortOrder === 'name' ? "#6a9fca" : "#555";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(this._sortNameBtn.x, this._sortNameBtn.y, this._sortNameBtn.w, this._sortNameBtn.h);
+            ctx.fillStyle = sortOrder === 'name' ? "#fff" : "#999";
+            ctx.font = "10px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("Az", this._sortNameBtn.x + sortBtnW/2, this._sortNameBtn.y + 14);
+            
+            // Sort by Date Desc button (newest first)
+            this._sortDateDescBtn = { x: 8 + sortBtnW + 4, y: pathBarY, w: sortBtnW, h: 20 };
+            ctx.fillStyle = sortOrder === 'date_desc' ? "#4a6f9a" : "#333";
+            ctx.fillRect(this._sortDateDescBtn.x, this._sortDateDescBtn.y, this._sortDateDescBtn.w, this._sortDateDescBtn.h);
+            ctx.strokeStyle = sortOrder === 'date_desc' ? "#6a9fca" : "#555";
+            ctx.strokeRect(this._sortDateDescBtn.x, this._sortDateDescBtn.y, this._sortDateDescBtn.w, this._sortDateDescBtn.h);
+            ctx.fillStyle = sortOrder === 'date_desc' ? "#fff" : "#999";
+            ctx.fillText("📅↓", this._sortDateDescBtn.x + sortBtnW/2, this._sortDateDescBtn.y + 14);
+            
+            // Sort by Date Asc button (oldest first)
+            this._sortDateAscBtn = { x: 8 + (sortBtnW + 4) * 2, y: pathBarY, w: sortBtnW, h: 20 };
+            ctx.fillStyle = sortOrder === 'date_asc' ? "#4a6f9a" : "#333";
+            ctx.fillRect(this._sortDateAscBtn.x, this._sortDateAscBtn.y, this._sortDateAscBtn.w, this._sortDateAscBtn.h);
+            ctx.strokeStyle = sortOrder === 'date_asc' ? "#6a9fca" : "#555";
+            ctx.strokeRect(this._sortDateAscBtn.x, this._sortDateAscBtn.y, this._sortDateAscBtn.w, this._sortDateAscBtn.h);
+            ctx.fillStyle = sortOrder === 'date_asc' ? "#fff" : "#999";
+            ctx.fillText("📅↑", this._sortDateAscBtn.x + sortBtnW/2, this._sortDateAscBtn.y + 14);
+            
+            // Thumbnail size selector (dropdown-like button)
+            const thumbSize = this.thumbnailSize || DEFAULT_THUMBNAIL_SIZE;
+            const sizeBtnW = 50;
+            this._thumbSizeBtn = { x: this.size[0] - sizeBtnW - 12, y: pathBarY, w: sizeBtnW, h: 20 };
+            ctx.fillStyle = "#333";
+            ctx.fillRect(this._thumbSizeBtn.x, this._thumbSizeBtn.y, this._thumbSizeBtn.w, this._thumbSizeBtn.h);
+            ctx.strokeStyle = "#555";
+            ctx.strokeRect(this._thumbSizeBtn.x, this._thumbSizeBtn.y, this._thumbSizeBtn.w, this._thumbSizeBtn.h);
+            ctx.fillStyle = "#ccc";
+            ctx.font = "10px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(`${thumbSize}px`, this._thumbSizeBtn.x + sizeBtnW/2, this._thumbSizeBtn.y + 14);
             
             // === GALLERY ===
             ctx.fillStyle = "#1a1a1a";
@@ -250,27 +411,27 @@ app.registerExtension({
                     const pi = i - start;
                     const col = pi % L.cols;
                     const row = Math.floor(pi / L.cols);
-                    const x = 8 + THUMBNAIL_PADDING + col * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
-                    const y = L.contentTop + THUMBNAIL_PADDING + row * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
+                    const x = 8 + THUMBNAIL_PADDING + col * (L.thumbSize + THUMBNAIL_PADDING);
+                    const y = L.contentTop + THUMBNAIL_PADDING + row * (L.thumbSize + THUMBNAIL_PADDING);
                     
                     // Selection
                     if (i === state.selectedIndex) {
                         ctx.fillStyle = "#4a9eff";
-                        ctx.fillRect(x - 3, y - 3, THUMBNAIL_SIZE + 6, THUMBNAIL_SIZE + 6);
+                        ctx.fillRect(x - 3, y - 3, L.thumbSize + 6, L.thumbSize + 6);
                     }
                     
                     ctx.fillStyle = "#333";
-                    ctx.fillRect(x, y, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+                    ctx.fillRect(x, y, L.thumbSize, L.thumbSize);
                     
                     const thumb = state.thumbnailCache[state.images[i].filename];
                     if (thumb && thumb !== false) {
-                        const scale = Math.min(THUMBNAIL_SIZE / thumb.width, THUMBNAIL_SIZE / thumb.height);
+                        const scale = Math.min(L.thumbSize / thumb.width, L.thumbSize / thumb.height);
                         const tw = thumb.width * scale;
                         const th = thumb.height * scale;
-                        ctx.drawImage(thumb, x + (THUMBNAIL_SIZE - tw)/2, y + (THUMBNAIL_SIZE - th)/2, tw, th);
+                        ctx.drawImage(thumb, x + (L.thumbSize - tw)/2, y + (L.thumbSize - th)/2, tw, th);
                     } else if (thumb === null) {
                         ctx.fillStyle = "#500";
-                        ctx.fillRect(x, y, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+                        ctx.fillRect(x, y, L.thumbSize, L.thumbSize);
                     }
                 }
             }
@@ -351,6 +512,57 @@ app.registerExtension({
                 }
             }
             
+            // Sort buttons
+            if (this._sortNameBtn) {
+                const r = this._sortNameBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    if (state.sortOrder !== 'name') {
+                        state.sortOrder = 'name';
+                        this.loadImages(this.activeTab);
+                    }
+                    return true;
+                }
+            }
+            if (this._sortDateDescBtn) {
+                const r = this._sortDateDescBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    if (state.sortOrder !== 'date_desc') {
+                        state.sortOrder = 'date_desc';
+                        this.loadImages(this.activeTab);
+                    }
+                    return true;
+                }
+            }
+            if (this._sortDateAscBtn) {
+                const r = this._sortDateAscBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    if (state.sortOrder !== 'date_asc') {
+                        state.sortOrder = 'date_asc';
+                        this.loadImages(this.activeTab);
+                    }
+                    return true;
+                }
+            }
+            
+            // Thumbnail size button - cycle through sizes
+            if (this._thumbSizeBtn) {
+                const r = this._thumbSizeBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    const currentIdx = THUMBNAIL_SIZES.indexOf(this.thumbnailSize);
+                    const nextIdx = (currentIdx + 1) % THUMBNAIL_SIZES.length;
+                    this.thumbnailSize = THUMBNAIL_SIZES[nextIdx];
+                    // Clear all thumbnail caches to reload with new size
+                    for (let i = 0; i < 3; i++) {
+                        this.tabState[i].thumbnailCache = {};
+                        if (this.tabState[i].images.length > 0) {
+                            this.loadThumbnails(i);
+                        }
+                    }
+                    this.setDirtyCanvas(true);
+                    return true;
+                }
+            }
+            
             // Prev/Next
             if (this._prevBtn) {
                 const r = this._prevBtn;
@@ -376,10 +588,10 @@ app.registerExtension({
                     const pi = i - start;
                     const col = pi % L.cols;
                     const row = Math.floor(pi / L.cols);
-                    const tx = 8 + THUMBNAIL_PADDING + col * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
-                    const ty = L.contentTop + THUMBNAIL_PADDING + row * (THUMBNAIL_SIZE + THUMBNAIL_PADDING);
+                    const tx = 8 + THUMBNAIL_PADDING + col * (L.thumbSize + THUMBNAIL_PADDING);
+                    const ty = L.contentTop + THUMBNAIL_PADDING + row * (L.thumbSize + THUMBNAIL_PADDING);
                     
-                    if (x >= tx && x <= tx + THUMBNAIL_SIZE && y >= ty && y <= ty + THUMBNAIL_SIZE) {
+                    if (x >= tx && x <= tx + L.thumbSize && y >= ty && y <= ty + L.thumbSize) {
                         state.selectedIndex = i;
                         const fn = state.images[i].filename;
                         const sw = this.selectedWidgets?.[this.activeTab];
@@ -393,6 +605,45 @@ app.registerExtension({
             }
             
             return origMouse?.apply(this, arguments);
+        };
+        
+        // Double-click handler for preview mode
+        const origDblClick = nodeType.prototype.onDblClick;
+        nodeType.prototype.onDblClick = function(e, pos, canvas) {
+            if (this.flags.collapsed) return origDblClick?.apply(this, arguments);
+            
+            const [x, y] = pos;
+            const L = this.getLayout();
+            const state = this.getState();
+            
+            // Check if double-click is on a thumbnail
+            if (y >= L.contentTop && y < L.navY && state.images?.length > 0) {
+                const start = state.currentPage * L.perPage;
+                const end = Math.min(start + L.perPage, state.images.length);
+                
+                for (let i = start; i < end; i++) {
+                    const pi = i - start;
+                    const col = pi % L.cols;
+                    const row = Math.floor(pi / L.cols);
+                    const tx = 8 + THUMBNAIL_PADDING + col * (L.thumbSize + THUMBNAIL_PADDING);
+                    const ty = L.contentTop + THUMBNAIL_PADDING + row * (L.thumbSize + THUMBNAIL_PADDING);
+                    
+                    if (x >= tx && x <= tx + L.thumbSize && y >= ty && y <= ty + L.thumbSize) {
+                        // Show preview using DOM overlay
+                        const folder = this.getFolderPath(this.activeTab);
+                        const filename = state.images[i].filename;
+                        if (folder && filename) {
+                            const imageSrc = `/imagefolderpicker/thumbnail?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(filename)}&size=512`;
+                            showPreviewOverlay(imageSrc, filename, () => {
+                                // Callback when closed - nothing needed
+                            });
+                        }
+                        return true;
+                    }
+                }
+            }
+            
+            return origDblClick?.apply(this, arguments);
         };
         
         // Mouse wheel
@@ -422,7 +673,12 @@ app.registerExtension({
         nodeType.prototype.onSerialize = function(o) {
             origSer?.apply(this, arguments);
             o.ifp_tab = this.activeTab;
-            o.ifp_states = this.tabState.map(s => ({ sel: s.selectedIndex, page: s.currentPage }));
+            o.ifp_thumbSize = this.thumbnailSize;
+            o.ifp_states = this.tabState.map(s => ({ 
+                sel: s.selectedIndex, 
+                page: s.currentPage,
+                sort: s.sortOrder 
+            }));
         };
         
         // Configure
@@ -430,11 +686,13 @@ app.registerExtension({
         nodeType.prototype.onConfigure = function(o) {
             origConf?.apply(this, arguments);
             this.activeTab = o.ifp_tab ?? 0;
+            this.thumbnailSize = o.ifp_thumbSize ?? DEFAULT_THUMBNAIL_SIZE;
             if (o.ifp_states) {
                 for (let i = 0; i < 3; i++) {
                     if (o.ifp_states[i]) {
                         this.tabState[i].selectedIndex = o.ifp_states[i].sel ?? -1;
                         this.tabState[i].currentPage = o.ifp_states[i].page ?? 0;
+                        this.tabState[i].sortOrder = o.ifp_states[i].sort ?? 'name';
                     }
                 }
             }

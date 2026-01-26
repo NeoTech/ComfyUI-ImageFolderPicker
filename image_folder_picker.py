@@ -41,6 +41,9 @@ class ImageFolderPicker:
                 }),
             },
             "optional": {
+                "folder1_input": ("STRING", {"forceInput": True}),
+                "folder2_input": ("STRING", {"forceInput": True}),
+                "folder3_input": ("STRING", {"forceInput": True}),
                 "selected_image1": ("STRING", {"default": ""}),
                 "selected_image2": ("STRING", {"default": ""}),
                 "selected_image3": ("STRING", {"default": ""}),
@@ -86,22 +89,34 @@ class ImageFolderPicker:
             return torch.zeros((1, 64, 64, 3), dtype=torch.float32)
     
     def load_selected_images(self, folder1, folder2, folder3, 
+                             folder1_input=None, folder2_input=None, folder3_input=None,
                              selected_image1="", selected_image2="", selected_image3="",
                              unique_id=None):
-        """Load all selected images."""
-        image1 = self.load_image(folder1, selected_image1)
-        image2 = self.load_image(folder2, selected_image2)
-        image3 = self.load_image(folder3, selected_image3)
+        """Load all selected images. folder*_input overrides folder* when connected."""
+        # Use input connections if provided, otherwise use widget values
+        f1 = folder1_input if folder1_input else folder1
+        f2 = folder2_input if folder2_input else folder2
+        f3 = folder3_input if folder3_input else folder3
+        
+        image1 = self.load_image(f1, selected_image1)
+        image2 = self.load_image(f2, selected_image2)
+        image3 = self.load_image(f3, selected_image3)
         
         return (image1, image2, image3)
     
     @classmethod
     def IS_CHANGED(cls, folder1="", folder2="", folder3="",
+                   folder1_input=None, folder2_input=None, folder3_input=None,
                    selected_image1="", selected_image2="", selected_image3="", **kwargs):
         """Return hash for cache invalidation."""
+        # Use input connections if provided
+        f1 = folder1_input if folder1_input else folder1
+        f2 = folder2_input if folder2_input else folder2
+        f3 = folder3_input if folder3_input else folder3
+        
         parts = []
         
-        for folder, selected in [(folder1, selected_image1), (folder2, selected_image2), (folder3, selected_image3)]:
+        for folder, selected in [(f1, selected_image1), (f2, selected_image2), (f3, selected_image3)]:
             if selected and folder:
                 image_path = os.path.join(folder, selected)
                 if os.path.exists(image_path):
@@ -114,9 +129,15 @@ class ImageFolderPicker:
     
     @classmethod
     def VALIDATE_INPUTS(cls, folder1="", folder2="", folder3="",
+                        folder1_input=None, folder2_input=None, folder3_input=None,
                         selected_image1="", selected_image2="", selected_image3="", **kwargs):
         """Validate that selected images exist."""
-        for folder, selected, tab in [(folder1, selected_image1, 1), (folder2, selected_image2, 2), (folder3, selected_image3, 3)]:
+        # Use input connections if provided
+        f1 = folder1_input if folder1_input else folder1
+        f2 = folder2_input if folder2_input else folder2
+        f3 = folder3_input if folder3_input else folder3
+        
+        for folder, selected, tab in [(f1, selected_image1, 1), (f2, selected_image2, 2), (f3, selected_image3, 3)]:
             if selected and folder:
                 path = os.path.join(folder, selected)
                 if not os.path.exists(path):
