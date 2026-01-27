@@ -7,10 +7,11 @@ A custom node for ComfyUI that allows you to browse a folder of images and selec
 - **Folder Browser**: Text input with folder dialog button to select image directories
 - **Thumbnail Gallery**: Visual grid of image thumbnails rendered directly in the node
 - **Click to Select**: Click any thumbnail to select it as the output image
-- **Scrollable Gallery**: Mouse wheel scrolling for large image collections
-- **Cached Thumbnails**: Thumbnails are stored in a `.thumbs` subfolder for fast loading
-- **Alpha Mask Output**: Extracts alpha channel from images as mask output (like the native Load Image node)
+- **Indexable Gallery**: Arrow navigation to browse through large image collections
+- **Cached Thumbnails**: Thumbnails are stored in a `.thumbs` subfolder for fast loading in different sizes
 - **Image Count**: Displays total number of images in the selected folder
+- **Zoom In preview**: Double click to open a preview of the image in a larger window
+- **Folder support**: Works with local folders on your machine
 
 ## Installation
 
@@ -47,6 +48,9 @@ A custom node for ComfyUI that allows you to browse a folder of images and selec
 ## Thumbnail Caching
 
 Thumbnails are automatically generated and cached in a `.thumbs` subfolder within your image folder. This speeds up subsequent loads. Click the **Refresh** button to regenerate thumbnails if your images have changed.
+
+## Screenshots
+![Image Folder Picker Node](example.png)
 
 ## License
 
