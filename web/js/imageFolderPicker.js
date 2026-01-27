@@ -970,8 +970,8 @@ app.registerExtension({
             
             // === NAVIGATION ===
             const cx = this.size[0] / 2;
-            const navBtnW = 22;
-            const navBtnH = 22;
+            const navBtnW = 44;
+            const navBtnH = 36;
             const navGap = 2;
             const canPrev = state.currentPage > 0;
             const canNext = state.currentPage < L.pages - 1;
@@ -998,9 +998,11 @@ app.registerExtension({
                 ctx.fillStyle = enabled ? "#444" : "#2a2a2a";
                 ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
                 ctx.fillStyle = enabled ? "#fff" : "#555";
-                ctx.font = "9px Arial";
+                ctx.font = "11px Arial";
                 ctx.textAlign = "center";
-                ctx.fillText(label, btn.x + btn.w/2, btn.y + 14);
+                ctx.textBaseline = "middle";
+                ctx.fillText(label, btn.x + btn.w/2, btn.y + btn.h/2);
+                ctx.textBaseline = "alphabetic";
             };
             
             // Draw left buttons
