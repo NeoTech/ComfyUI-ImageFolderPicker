@@ -11,11 +11,15 @@ A custom node for ComfyUI that allows you to browse a folder of images and selec
 - **Indexable Gallery**: Arrow navigation to browse through large image collections
 - **Cached Thumbnails**: Thumbnails are stored in a `.thumbs` subfolder for fast loading in different sizes
 - **Image Count**: Displays total number of images in the selected folder
-- **Zoom In preview**: Double click to open a preview of the image in a larger window
-- **Folder support**: Works with local folders on your machine
+- **Full-Resolution Preview**: Double-click any image to open a full-resolution preview overlay
+- **Preview Navigation**: Navigate between images in preview mode using arrow keys or on-screen buttons
+- **Delete Images**: Delete button on each thumbnail (with confirmation dialog) to remove unwanted images
+- **Subfolder Support**: Navigate into subfolders; toggle folder visibility with the 📁/📂 button
+- **Jump to Selected**: Click 📍 button to jump to the page containing the currently selected image
 - **Alpha Channel Output**: Each tab outputs both the image and its alpha channel as a mask
 - **Auto-Refresh**: Folders are monitored for changes and thumbnails update automatically
 - **Smart Watching**: Only the active tab's folder is monitored to minimize resource usage
+- **Execution Pause**: Folder watching pauses during workflow execution to avoid interference
 
 ## Installation
 
@@ -32,6 +36,28 @@ A custom node for ComfyUI that allows you to browse a folder of images and selec
 4. Thumbnails will load and display in the node
 5. Click any thumbnail to select that image
 6. Each tab outputs its selected image and alpha mask
+
+### Preview Mode
+
+- **Double-click** any image thumbnail to open full-resolution preview
+- Use **Left/Right arrow keys** or the **◀/▶ buttons** to navigate between images
+- Press **Escape** or click outside the image to close the preview
+- The image you're viewing when you close becomes the selected image
+
+### Deleting Images
+
+- Hover over any thumbnail to reveal the **🗑** delete button in the top-right corner
+- Click the delete button to open a confirmation dialog
+- Confirm deletion to permanently remove the file from disk
+- The gallery refreshes automatically after deletion
+
+### Navigation Controls
+
+- **Sort buttons** (Az, 📅↓, 📅↑): Sort by name or date
+- **📁/📂 button**: Toggle subfolder visibility
+- **📍 button**: Jump to the page containing the selected image
+- **Size dropdown**: Change thumbnail size (64-320px)
+- **Page buttons**: Navigate by 1, 5, 10, or 100 pages
 
 ## Outputs
 
