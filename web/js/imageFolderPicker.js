@@ -688,6 +688,20 @@ app.registerExtension({
             ctx.textAlign = "center";
             ctx.fillText(this.hideFolders ? "📁" : "📂", this._folderToggleBtn.x + folderBtnW/2, this._folderToggleBtn.y + 15);
             
+            // Jump to selected button (next to folder toggle)
+            const jumpBtnW = 24;
+            const hasSelection = state.selectedIndex >= 0;
+            this._jumpToSelectedBtn = { x: this._folderToggleBtn.x - jumpBtnW - 6, y: pathBarY, w: jumpBtnW, h: 20 };
+            ctx.fillStyle = hasSelection ? "#3a4a5a" : "#2a2a2a";
+            ctx.fillRect(this._jumpToSelectedBtn.x, this._jumpToSelectedBtn.y, this._jumpToSelectedBtn.w, this._jumpToSelectedBtn.h);
+            ctx.strokeStyle = hasSelection ? "#5a7a9a" : "#444";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(this._jumpToSelectedBtn.x, this._jumpToSelectedBtn.y, this._jumpToSelectedBtn.w, this._jumpToSelectedBtn.h);
+            ctx.fillStyle = hasSelection ? "#9cf" : "#666";
+            ctx.font = "11px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("📍", this._jumpToSelectedBtn.x + jumpBtnW/2, this._jumpToSelectedBtn.y + 15);
+            
             // === GALLERY ===
             ctx.fillStyle = "#1a1a1a";
             ctx.fillRect(8, L.contentTop, this.size[0] - 16, L.galleryHeight);
@@ -1082,6 +1096,20 @@ app.registerExtension({
                     // Reset to page 0 when toggling
                     state.currentPage = 0;
                     this.setDirtyCanvas(true);
+                    return true;
+                }
+            }
+            
+            // Jump to selected button
+            if (this._jumpToSelectedBtn) {
+                const r = this._jumpToSelectedBtn;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    if (state.selectedIndex >= 0) {
+                        const totalFolders = this.hideFolders ? 0 : (state.subfolders?.length || 0);
+                        const itemIndex = totalFolders + state.selectedIndex;
+                        state.currentPage = Math.floor(itemIndex / L.perPage);
+                        this.setDirtyCanvas(true);
+                    }
                     return true;
                 }
             }
