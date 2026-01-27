@@ -6,7 +6,31 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-console.log("[ImageFolderPicker] Extension loading...");
+// Listen for folder change events from Python (via WebSocket)
+api.addEventListener("imagefolderpicker.folder_changed", (event) => {
+    const changedFolder = event.detail?.folder;
+    if (!changedFolder) return;
+    
+    // Find all ImageFolderPicker nodes and refresh those watching this folder
+    for (const node of app.graph._nodes || []) {
+        if (node.type !== "ImageFolderPicker") continue;
+        
+        for (let i = 0; i < 5; i++) {
+            try {
+                const watchedFolder = node.getFolderPath?.(i);
+                // Normalize paths for comparison (handle slashes)
+                const normalizedWatched = watchedFolder?.replace(/\\/g, '/').toLowerCase() || '';
+                const normalizedChanged = changedFolder.replace(/\\/g, '/').toLowerCase();
+                
+                if (normalizedWatched === normalizedChanged) {
+                    node.loadImages(i);
+                }
+            } catch (e) {
+                // Ignore errors for nodes that aren't fully initialized
+            }
+        }
+    }
+});
 
 // Thumbnail size options
 const THUMBNAIL_SIZES = [64, 128, 192, 256, 320];
@@ -94,8 +118,6 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
         if (nodeData.name !== "ImageFolderPicker") return;
         
-        console.log("[ImageFolderPicker] Registering node definition");
-        
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         
         nodeType.prototype.onNodeCreated = function() {
@@ -174,6 +196,31 @@ app.registerExtension({
             this.setDirtyCanvas(true);
         };
         
+        // Handle connection changes - auto-load when folder input gets connected
+        const origOnConnectionsChange = nodeType.prototype.onConnectionsChange;
+        nodeType.prototype.onConnectionsChange = function(type, slotIndex, isConnected, link, ioSlot) {
+            origOnConnectionsChange?.apply(this, arguments);
+            
+            // Check if this is an input connection (type 1 = input)
+            if (type === 1 && isConnected && ioSlot?.name) {
+                // Check if it's a folder input
+                const match = ioSlot.name.match(/^folder(\d+)_input$/);
+                if (match) {
+                    const tabIdx = parseInt(match[1]) - 1;
+                    // Clear folder override and load after a short delay (let connection settle)
+                    setTimeout(() => {
+                        const state = this.tabState[tabIdx];
+                        if (state) {
+                            state.folderOverride = '';
+                            const fow = this.folderOverrideWidgets?.[tabIdx];
+                            if (fow) fow.value = '';
+                        }
+                        this.loadImages(tabIdx);
+                    }, 100);
+                }
+            }
+        };
+        
         nodeType.prototype.getState = function() {
             return this.tabState?.[this.activeTab] || { images: [], thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false };
         };
@@ -213,6 +260,7 @@ app.registerExtension({
             // Try to find the subgraph's output definition for this slot
             // Subgraph outputs have linkIds that point to internal links
             const subgraphOutput = subgraph.outputs?.[outputSlotIdx];
+            
             if (subgraphOutput?.linkIds?.length > 0) {
                 // Find the internal link that feeds this output
                 const internalLinkId = subgraphOutput.linkIds[0];
@@ -232,35 +280,32 @@ app.registerExtension({
                 }
             }
             
-            // Alternative: iterate through subgraph nodes to find primitive/string nodes
-            // This handles cases where the output mapping isn't explicit
+            // Alternative approach: Find the SubgraphOutput node for this specific slot
+            // and trace back from there
             if (subgraph.nodes) {
                 for (const internalNode of subgraph.nodes) {
-                    // Skip subgraph IO nodes
                     const nodeType = internalNode.type?.toLowerCase() || '';
-                    if (nodeType.includes('subgraphinput') || nodeType.includes('subgraphoutput')) {
-                        continue;
-                    }
                     
-                    // Check for output connections to subgraph output
-                    if (internalNode.outputs) {
-                        for (let i = 0; i < internalNode.outputs.length; i++) {
-                            const output = internalNode.outputs[i];
-                            if (output?.links?.length > 0) {
-                                // Check if any of these links eventually connect to the subgraph output
-                                const value = getNodeStringValue(internalNode, i);
-                                if (value && typeof value === 'string') {
-                                    return value;
+                    // Find the SubgraphOutput node that corresponds to our output slot
+                    if (nodeType.includes('subgraphoutput') || nodeType.includes('graph/output')) {
+                        // Check if this output node's slot index matches
+                        const slotProperty = internalNode.properties?.slot ?? internalNode.properties?.index;
+                        if (slotProperty === outputSlotIdx) {
+                            // Trace back through the input of this SubgraphOutput node
+                            if (internalNode.inputs?.[0]?.link != null) {
+                                const linkId = internalNode.inputs[0].link;
+                                const link = subgraph.links?.[linkId] || subgraph._links?.get?.(linkId);
+                                if (link) {
+                                    const sourceNode = subgraph.getNodeById?.(link.origin_id);
+                                    if (sourceNode) {
+                                        if (sourceNode.isSubgraphNode?.()) {
+                                            return getSubgraphOutputValue(sourceNode, link.origin_slot);
+                                        }
+                                        return getNodeStringValue(sourceNode, link.origin_slot);
+                                    }
                                 }
                             }
                         }
-                    }
-                    
-                    // Also check nodes that might just have a value widget even without output links
-                    const value = getNodeStringValue(internalNode, 0);
-                    if (value && typeof value === 'string' && 
-                        (nodeType.includes('string') || nodeType.includes('primitive') || nodeType.includes('text'))) {
-                        return value;
                     }
                 }
             }
@@ -296,7 +341,10 @@ app.registerExtension({
                             const resolvedInfo = resolved.subgraphInput ?? resolved.output;
                             if (resolvedInfo?.node) {
                                 originNode = resolvedInfo.node;
-                                originSlot = resolvedInfo.slot ?? 0;
+                                // Only use resolvedInfo.slot if it's defined, otherwise keep original link.origin_slot
+                                if (resolvedInfo.slot !== undefined) {
+                                    originSlot = resolvedInfo.slot;
+                                }
                             }
                         }
                     }
@@ -362,6 +410,9 @@ app.registerExtension({
                     }
                     
                     this.loadThumbnails(tabIdx);
+                    
+                    // Register this folder for file watching (auto-refresh on changes)
+                    this.watchFolder(folder);
                 } else {
                     state.images = [];
                     state.subfolders = [];
@@ -374,6 +425,20 @@ app.registerExtension({
             
             state.isLoading = false;
             this.setDirtyCanvas(true);
+        };
+        
+        nodeType.prototype.watchFolder = async function(folder) {
+            if (!folder) return;
+            
+            try {
+                await api.fetchApi("/imagefolderpicker/watch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ folder })
+                });
+            } catch (e) {
+                // Silently fail - watching is optional enhancement
+            }
         };
         
         nodeType.prototype.loadThumbnails = function(tabIdx) {
@@ -834,6 +899,11 @@ app.registerExtension({
                     const val = prompt("Enter folder path:", fw?.value || "");
                     if (val !== null && fw) {
                         fw.value = val;
+                        // Clear folder override and auto-load
+                        state.folderOverride = '';
+                        const fow = this.folderOverrideWidgets?.[this.activeTab];
+                        if (fow) fow.value = '';
+                        this.loadImages(this.activeTab);
                         this.setDirtyCanvas(true);
                     }
                     return true;
@@ -1161,5 +1231,3 @@ app.registerExtension({
         };
     }
 });
-
-console.log("[ImageFolderPicker] Extension registered");

@@ -357,4 +357,68 @@ def register_routes():
             "image_count": image_count
         })
     
-    print("[ImageFolderPicker] Routes registered successfully")
+    @routes.post("/imagefolderpicker/watch")
+    async def watch_folder(request):
+        """Start watching a folder for changes."""
+        try:
+            data = await request.json()
+            folder = data.get("folder", "")
+        except:
+            return web.json_response({"error": "Invalid request"}, status=400)
+        
+        if not folder or not os.path.isdir(folder):
+            return web.json_response({"error": "Invalid folder"}, status=400)
+        
+        try:
+            from .folder_watcher import FolderWatcherManager
+            manager = FolderWatcherManager.get_instance()
+            success = manager.watch_folder(folder)
+            return web.json_response({
+                "status": "watching" if success else "unavailable",
+                "folder": folder
+            })
+        except ImportError:
+            return web.json_response({"status": "unavailable", "error": "watchdog not installed"})
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)
+    
+    @routes.post("/imagefolderpicker/unwatch")
+    async def unwatch_folder(request):
+        """Stop watching a folder."""
+        try:
+            data = await request.json()
+            folder = data.get("folder", "")
+        except:
+            return web.json_response({"error": "Invalid request"}, status=400)
+        
+        if not folder:
+            return web.json_response({"error": "No folder specified"}, status=400)
+        
+        try:
+            from .folder_watcher import FolderWatcherManager
+            manager = FolderWatcherManager.get_instance()
+            still_watching = manager.unwatch_folder(folder)
+            return web.json_response({
+                "status": "still_watching" if still_watching else "unwatched",
+                "folder": folder
+            })
+        except ImportError:
+            return web.json_response({"status": "unavailable"})
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)
+    
+    @routes.get("/imagefolderpicker/watched")
+    async def get_watched_folders(request):
+        """Get list of currently watched folders."""
+        try:
+            from .folder_watcher import FolderWatcherManager
+            manager = FolderWatcherManager.get_instance()
+            folders = manager.get_watched_folders()
+            return web.json_response({
+                "folders": folders,
+                "count": len(folders)
+            })
+        except ImportError:
+            return web.json_response({"folders": [], "count": 0, "status": "unavailable"})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
