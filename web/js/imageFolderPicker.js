@@ -105,8 +105,9 @@ function showPreviewOverlay(imageSrc, filename, onClose) {
                     justify-content: center; cursor: pointer; font-size: 20px; color: white;
                     font-weight: bold;" id="ifp-close-btn">✕</div>
         <div style="background: repeating-conic-gradient(#999 0% 25%, #ccc 0% 50%) 50% / 20px 20px;
-                    border: 3px solid #4a9eff; border-radius: 4px; display: inline-block;">
-            <img src="${imageSrc}" style="max-width: 90vw; max-height: 85vh; object-fit: contain; 
+                    border: 3px solid #4a9eff; border-radius: 4px; display: inline-block;
+                    max-width: 90vw; max-height: 90vh;">
+            <img src="${imageSrc}" style="max-width: 90vw; max-height: 90vh; object-fit: contain; 
                  display: block;" />
         </div>
         <div style="color: #ccc; font-size: 14px; margin-top: 12px; font-family: Arial, sans-serif;">
@@ -1434,7 +1435,7 @@ app.registerExtension({
                             const folder = this.getFolderPath(this.activeTab);
                             const filename = state.images[imgIdx].filename;
                             if (folder && filename) {
-                                const imageSrc = `/imagefolderpicker/thumbnail?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(filename)}&size=512`;
+                                const imageSrc = `/imagefolderpicker/image?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(filename)}`;
                                 showPreviewOverlay(imageSrc, filename, () => {
                                     // Callback when closed - nothing needed
                                 });

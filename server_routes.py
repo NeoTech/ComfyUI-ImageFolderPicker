@@ -263,6 +263,49 @@ def register_routes():
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
     
+    @routes.get("/imagefolderpicker/image")
+    async def get_full_image(request):
+        """Get the original full-resolution image."""
+        folder = request.rel_url.query.get("folder", "")
+        filename = request.rel_url.query.get("filename", "")
+        
+        if not folder or not filename:
+            return web.json_response({"error": "Missing folder or filename"}, status=400)
+        
+        image_path = os.path.join(folder, filename)
+        
+        if not os.path.exists(image_path):
+            return web.json_response({"error": "Image not found"}, status=404)
+        
+        # Security check - ensure filename doesn't escape folder
+        real_folder = os.path.realpath(folder)
+        real_image = os.path.realpath(image_path)
+        if not real_image.startswith(real_folder):
+            return web.json_response({"error": "Invalid path"}, status=403)
+        
+        # Determine content type based on extension
+        ext = os.path.splitext(filename)[1].lower()
+        content_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif',
+            '.bmp': 'image/bmp',
+            '.tiff': 'image/tiff',
+            '.tif': 'image/tiff'
+        }
+        content_type = content_types.get(ext, 'application/octet-stream')
+        
+        try:
+            with open(image_path, 'rb') as f:
+                return web.Response(
+                    body=f.read(),
+                    content_type=content_type
+                )
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+    
     @routes.post("/imagefolderpicker/refresh")
     async def refresh_thumbnails(request):
         """Regenerate all thumbnails in a folder."""
