@@ -86,6 +86,10 @@ class FolderWatcherManager:
         self._notify_timer: Optional[threading.Timer] = None
         self._notify_lock = threading.Lock()
         
+        # Pause state (for workflow execution)
+        self._paused = False
+        self._paused_notifications: Set[str] = set()
+        
         # Start the observer thread
         self.observer.start()
     
@@ -169,9 +173,40 @@ class FolderWatcherManager:
         with self._watch_lock:
             return list(self._watches.keys())
     
+    def pause(self):
+        """Pause notifications (useful during workflow execution)."""
+        with self._notify_lock:
+            self._paused = True
+            # Cancel any pending timer
+            if self._notify_timer is not None:
+                self._notify_timer.cancel()
+                self._notify_timer = None
+    
+    def resume(self):
+        """Resume notifications and send any that were queued while paused."""
+        with self._notify_lock:
+            self._paused = False
+            # Merge any notifications that came in while paused
+            if self._paused_notifications:
+                self._pending_notifications.update(self._paused_notifications)
+                self._paused_notifications.clear()
+                # Schedule sending after short delay
+                self._notify_timer = threading.Timer(0.3, self._send_notifications)
+                self._notify_timer.start()
+    
+    @property
+    def is_paused(self) -> bool:
+        """Check if notifications are paused."""
+        return self._paused
+    
     def _schedule_notification(self, folder_path: str):
         """Schedule a debounced notification for a folder change."""
         with self._notify_lock:
+            # If paused, queue for later
+            if self._paused:
+                self._paused_notifications.add(folder_path)
+                return
+            
             self._pending_notifications.add(folder_path)
             
             # Cancel existing timer

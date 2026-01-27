@@ -14,12 +14,15 @@ A custom node for ComfyUI that allows you to browse a folder of images and selec
 - **Zoom In preview**: Double click to open a preview of the image in a larger window
 - **Folder support**: Works with local folders on your machine
 - **Alpha Channel Output**: Each tab outputs both the image and its alpha channel as a mask
+- **Auto-Refresh**: Folders are monitored for changes and thumbnails update automatically
+- **Smart Watching**: Only the active tab's folder is monitored to minimize resource usage
 
 ## Installation
 
 1. Navigate to your ComfyUI `custom_nodes` folder
 2. Clone or copy this folder: `ComfyUI-ImageFolderPicker`
-3. Restart ComfyUI
+3. Install optional dependency for auto-refresh: `pip install watchdog`
+4. Restart ComfyUI
 
 ## Usage
 
@@ -53,6 +56,17 @@ Each tab has both a widget input and an optional string input for the folder pat
 ## Thumbnail Caching
 
 Thumbnails are automatically generated and cached in a `.thumbs` subfolder within your image folder. This speeds up subsequent loads. Click the **Refresh** button to regenerate thumbnails if your images have changed.
+
+## Auto-Refresh (Folder Watching)
+
+When the optional `watchdog` library is installed, the node automatically monitors the active tab's folder for changes:
+
+- **Real-time updates**: New, modified, or deleted images are detected automatically
+- **Smart pausing**: Folder watching is paused during workflow execution to avoid interference
+- **Efficient**: Only the currently active tab's folder is monitored
+- **Debounced**: Rapid file changes are batched to avoid excessive refreshes
+
+If `watchdog` is not installed, the node works normally but requires manual refresh.
 
 ## Screenshots
 ![Image Folder Picker Node](example.png)

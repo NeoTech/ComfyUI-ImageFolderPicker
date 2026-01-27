@@ -422,3 +422,29 @@ def register_routes():
             return web.json_response({"folders": [], "count": 0, "status": "unavailable"})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
+    
+    @routes.post("/imagefolderpicker/pause")
+    async def pause_watcher(request):
+        """Pause folder watching notifications (during workflow execution)."""
+        try:
+            from .folder_watcher import FolderWatcherManager
+            manager = FolderWatcherManager.get_instance()
+            manager.pause()
+            return web.json_response({"status": "paused"})
+        except ImportError:
+            return web.json_response({"status": "unavailable"})
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)
+    
+    @routes.post("/imagefolderpicker/resume")
+    async def resume_watcher(request):
+        """Resume folder watching notifications after workflow execution."""
+        try:
+            from .folder_watcher import FolderWatcherManager
+            manager = FolderWatcherManager.get_instance()
+            manager.resume()
+            return web.json_response({"status": "resumed"})
+        except ImportError:
+            return web.json_response({"status": "unavailable"})
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)

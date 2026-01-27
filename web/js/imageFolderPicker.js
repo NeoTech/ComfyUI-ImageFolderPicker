@@ -6,6 +6,37 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
+// Pause folder watching during workflow execution
+let _executionInProgress = false;
+
+// Helper to redraw all ImageFolderPicker nodes
+function _redrawAllIFPNodes() {
+    for (const node of app.graph?._nodes || []) {
+        if (node.type === "ImageFolderPicker") {
+            node.setDirtyCanvas(true);
+        }
+    }
+}
+
+api.addEventListener("execution_start", async () => {
+    _executionInProgress = true;
+    _redrawAllIFPNodes();
+    try {
+        await api.fetchApi("/imagefolderpicker/pause", { method: "POST" });
+    } catch (e) { /* ignore */ }
+});
+
+api.addEventListener("executing", async (event) => {
+    // When node_id is null, execution has finished
+    if (event.detail === null && _executionInProgress) {
+        _executionInProgress = false;
+        _redrawAllIFPNodes();
+        try {
+            await api.fetchApi("/imagefolderpicker/resume", { method: "POST" });
+        } catch (e) { /* ignore */ }
+    }
+});
+
 // Listen for folder change events from Python (via WebSocket)
 api.addEventListener("imagefolderpicker.folder_changed", (event) => {
     const changedFolder = event.detail?.folder;
@@ -441,6 +472,20 @@ app.registerExtension({
             }
         };
         
+        nodeType.prototype.unwatchFolder = async function(folder) {
+            if (!folder) return;
+            
+            try {
+                await api.fetchApi("/imagefolderpicker/unwatch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ folder })
+                });
+            } catch (e) {
+                // Silently fail
+            }
+        };
+        
         nodeType.prototype.loadThumbnails = function(tabIdx) {
             const folder = this.getFolderPath(tabIdx);
             const state = this.tabState[tabIdx];
@@ -868,12 +913,32 @@ app.registerExtension({
                 this._sizeMenuRect = null;
                 this._sizeMenuItems = null;
             }
+            
+            // === EXECUTION OVERLAY ===
+            // Draw semi-transparent overlay when workflow is executing
+            if (_executionInProgress) {
+                ctx.save();
+                ctx.fillStyle = "rgba(80, 20, 20, 0.6)";
+                ctx.fillRect(0, L.top, this.size[0], this.size[1] - L.top);
+                
+                // Draw "Executing..." text
+                ctx.fillStyle = "#ff6666";
+                ctx.font = "bold 14px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                const centerY = L.top + (this.size[1] - L.top) / 2;
+                ctx.fillText("⏳ Executing...", this.size[0] / 2, centerY);
+                ctx.restore();
+            }
         };
         
         // Mouse handling
         const origMouse = nodeType.prototype.onMouseDown;
         nodeType.prototype.onMouseDown = function(e, pos, canvas) {
             if (this.flags.collapsed) return origMouse?.apply(this, arguments);
+            
+            // Block interactions during execution
+            if (_executionInProgress) return true;
             
             const [x, y] = pos;
             const L = this.getLayout();
@@ -884,7 +949,23 @@ app.registerExtension({
                 for (let i = 0; i < 5; i++) {
                     const t = this._tabs[i];
                     if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h) {
-                        this.activeTab = i;
+                        if (this.activeTab !== i) {
+                            const prevTab = this.activeTab;
+                            const prevFolder = this.getFolderPath(prevTab);
+                            this.activeTab = i;
+                            const newFolder = this.getFolderPath(i);
+                            
+                            // Unwatch previous folder, watch new folder (only active tab is watched)
+                            if (prevFolder && prevFolder !== newFolder) {
+                                this.unwatchFolder(prevFolder);
+                            }
+                            
+                            // Debounced refresh on tab switch
+                            if (this._tabSwitchTimer) clearTimeout(this._tabSwitchTimer);
+                            this._tabSwitchTimer = setTimeout(() => {
+                                this.loadImages(i);
+                            }, 150);
+                        }
                         this.setDirtyCanvas(true);
                         return true;
                     }
@@ -1102,6 +1183,9 @@ app.registerExtension({
         nodeType.prototype.onDblClick = function(e, pos, canvas) {
             if (this.flags.collapsed) return origDblClick?.apply(this, arguments);
             
+            // Block interactions during execution
+            if (_executionInProgress) return true;
+            
             const [x, y] = pos;
             const L = this.getLayout();
             const state = this.getState();
@@ -1167,6 +1251,9 @@ app.registerExtension({
         const origWheel = nodeType.prototype.onMouseWheel;
         nodeType.prototype.onMouseWheel = function(e, pos) {
             if (this.flags.collapsed) return;
+            
+            // Block interactions during execution
+            if (_executionInProgress) return;
             
             const L = this.getLayout();
             const state = this.getState();
