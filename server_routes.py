@@ -294,6 +294,57 @@ def register_routes():
             "errors": errors
         })
     
+    @routes.post("/imagefolderpicker/delete")
+    async def delete_image(request):
+        """Delete an image file from a folder."""
+        try:
+            data = await request.json()
+            folder = data.get("folder", "")
+            filename = data.get("filename", "")
+        except:
+            return web.json_response({"error": "Invalid request"}, status=400)
+        
+        if not folder or not filename:
+            return web.json_response({"error": "Missing folder or filename"}, status=400)
+        
+        image_path = os.path.join(folder, filename)
+        
+        # Security check - ensure filename doesn't escape folder (prevent directory traversal)
+        real_folder = os.path.realpath(folder)
+        real_image = os.path.realpath(image_path)
+        if not real_image.startswith(real_folder):
+            return web.json_response({"error": "Invalid path"}, status=403)
+        
+        if not os.path.exists(image_path):
+            return web.json_response({"error": "File not found"}, status=404)
+        
+        # Check if it's a valid image file
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in VALID_EXTENSIONS:
+            return web.json_response({"error": "Not a valid image file"}, status=400)
+        
+        try:
+            # Delete the image file
+            os.remove(image_path)
+            
+            # Also delete cached thumbnails (all sizes)
+            for size in THUMBNAIL_SIZES:
+                _, thumb_path = get_thumbnail_path(folder, filename, size)
+                if os.path.exists(thumb_path):
+                    try:
+                        os.remove(thumb_path)
+                    except:
+                        pass  # Ignore thumbnail deletion errors
+            
+            return web.json_response({
+                "status": "deleted",
+                "filename": filename
+            })
+        except PermissionError:
+            return web.json_response({"error": "Permission denied"}, status=403)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+    
     @routes.get("/imagefolderpicker/browse")
     async def browse_folders(request):
         """Browse folders on the system for folder picker dialog."""

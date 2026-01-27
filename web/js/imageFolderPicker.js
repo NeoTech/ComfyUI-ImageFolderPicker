@@ -143,6 +143,84 @@ function hidePreviewOverlay() {
     }
 }
 
+// Delete confirmation modal
+let deleteConfirmOverlay = null;
+
+function showDeleteConfirmation(filename, onConfirm, onCancel) {
+    // Create overlay if doesn't exist
+    if (!deleteConfirmOverlay) {
+        deleteConfirmOverlay = document.createElement('div');
+        deleteConfirmOverlay.id = 'ifp-delete-confirm-overlay';
+        deleteConfirmOverlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        `;
+        document.body.appendChild(deleteConfirmOverlay);
+    }
+    
+    deleteConfirmOverlay.innerHTML = `
+        <div style="background: #2a2020; border: 2px solid #c44; border-radius: 8px; padding: 24px 32px;
+                    max-width: 400px; text-align: center; font-family: Arial, sans-serif;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🗑️</div>
+            <div style="color: #ff6666; font-size: 18px; font-weight: bold; margin-bottom: 12px;">
+                Delete File?
+            </div>
+            <div style="color: #ccc; font-size: 14px; margin-bottom: 8px; word-break: break-all;">
+                ${filename}
+            </div>
+            <div style="color: #f88; font-size: 13px; margin-bottom: 24px;">
+                ⚠️ This action cannot be undone!
+            </div>
+            <div style="display: flex; gap: 16px; justify-content: center;">
+                <button id="ifp-delete-cancel" style="padding: 10px 24px; font-size: 14px; cursor: pointer;
+                        background: #444; color: #ccc; border: 1px solid #666; border-radius: 4px;">
+                    Cancel
+                </button>
+                <button id="ifp-delete-confirm" style="padding: 10px 24px; font-size: 14px; cursor: pointer;
+                        background: #a33; color: #fff; border: 1px solid #c44; border-radius: 4px;
+                        font-weight: bold;">
+                    Delete
+                </button>
+            </div>
+        </div>
+    `;
+    
+    deleteConfirmOverlay.style.display = 'flex';
+    
+    const cleanup = () => {
+        deleteConfirmOverlay.style.display = 'none';
+        document.removeEventListener('keydown', keyHandler);
+    };
+    
+    const keyHandler = (e) => {
+        if (e.key === 'Escape') {
+            cleanup();
+            onCancel?.();
+        }
+    };
+    
+    document.getElementById('ifp-delete-cancel').onclick = () => {
+        cleanup();
+        onCancel?.();
+    };
+    
+    document.getElementById('ifp-delete-confirm').onclick = () => {
+        cleanup();
+        onConfirm?.();
+    };
+    
+    document.addEventListener('keydown', keyHandler);
+}
+
 app.registerExtension({
     name: "Comfy.ImageFolderPicker",
     
@@ -498,6 +576,40 @@ app.registerExtension({
             }
         };
         
+        nodeType.prototype.deleteImage = async function(folder, filename) {
+            if (!folder || !filename) return;
+            
+            try {
+                const resp = await api.fetchApi("/imagefolderpicker/delete", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ folder, filename })
+                });
+                
+                if (resp.ok) {
+                    // Clear selection if deleted image was selected
+                    const state = this.tabState[this.activeTab];
+                    const deletedIdx = state.images.findIndex(img => img.filename === filename);
+                    if (deletedIdx === state.selectedIndex) {
+                        state.selectedIndex = -1;
+                        const sw = this.selectedWidgets?.[this.activeTab];
+                        if (sw) sw.value = "";
+                    } else if (deletedIdx < state.selectedIndex) {
+                        // Adjust selection index if deleted image was before selected
+                        state.selectedIndex--;
+                    }
+                    
+                    // Reload images
+                    this.loadImages(this.activeTab);
+                } else {
+                    const data = await resp.json();
+                    console.error("[ImageFolderPicker] Delete failed:", data.error);
+                }
+            } catch (e) {
+                console.error("[ImageFolderPicker] Delete error:", e);
+            }
+        };
+        
         nodeType.prototype.loadThumbnails = function(tabIdx) {
             const folder = this.getFolderPath(tabIdx);
             const state = this.tabState[tabIdx];
@@ -726,6 +838,9 @@ app.registerExtension({
                 
                 const cellHeight = L.thumbSize + INFO_HEIGHT + THUMBNAIL_PADDING;
                 
+                // Reset delete buttons array for click detection
+                this._deleteButtons = [];
+                
                 // Combined items: subfolders first, then images
                 for (let i = start; i < end; i++) {
                     const pi = i - start;
@@ -820,6 +935,35 @@ app.registerExtension({
                             ctx.font = "8px Arial";
                             ctx.fillText(`${imgData.width}×${imgData.height}`, x + L.thumbSize/2, y + L.thumbSize + 20);
                         }
+                        
+                        // Draw delete button (red X in top-right corner)
+                        const delBtnSize = 16;
+                        const delBtnX = x + L.thumbSize - delBtnSize - 2;
+                        const delBtnY = y + 2;
+                        
+                        // Store button rect for click detection
+                        this._deleteButtons.push({
+                            x: delBtnX,
+                            y: delBtnY,
+                            w: delBtnSize,
+                            h: delBtnSize,
+                            imgIdx: imgIdx,
+                            filename: imgData.filename
+                        });
+                        
+                        // Button background
+                        ctx.fillStyle = "rgba(180, 40, 40, 0.85)";
+                        ctx.beginPath();
+                        ctx.roundRect(delBtnX, delBtnY, delBtnSize, delBtnSize, 3);
+                        ctx.fill();
+                        
+                        // X symbol
+                        ctx.fillStyle = "#fff";
+                        ctx.font = "bold 11px Arial";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText("✕", delBtnX + delBtnSize/2, delBtnY + delBtnSize/2);
+                        ctx.textBaseline = "alphabetic";
                     }
                 }
             }
@@ -1179,6 +1323,21 @@ app.registerExtension({
             if (checkNavBtn(this._next5Btn, 5)) return true;
             if (checkNavBtn(this._next10Btn, 10)) return true;
             if (checkNavBtn(this._next100Btn, 100)) return true;
+            
+            // Delete button clicks (check before thumbnail selection)
+            if (this._deleteButtons) {
+                for (const btn of this._deleteButtons) {
+                    if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+                        const folder = this.getFolderPath(this.activeTab);
+                        const filename = btn.filename;
+                        showDeleteConfirmation(filename, 
+                            () => this.deleteImage(folder, filename),
+                            () => { /* cancelled */ }
+                        );
+                        return true;
+                    }
+                }
+            }
             
             // Thumbnail/folder clicks
             if (y >= L.contentTop && y < L.navY && L.totalItems > 0) {
