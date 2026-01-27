@@ -153,6 +153,15 @@ app.registerExtension({
                 this.widgets?.find(w => w.name === "selected_image5")
             ];
             
+            // Store references to folderOverride widgets (for syncing with tabState.folderOverride)
+            this.folderOverrideWidgets = [
+                this.widgets?.find(w => w.name === "folderOverride1"),
+                this.widgets?.find(w => w.name === "folderOverride2"),
+                this.widgets?.find(w => w.name === "folderOverride3"),
+                this.widgets?.find(w => w.name === "folderOverride4"),
+                this.widgets?.find(w => w.name === "folderOverride5")
+            ];
+            
             // Hide all widgets visually - we draw our own UI
             // IMPORTANT: Don't change w.type to "hidden" as that prevents serialization!
             if (this.widgets) {
@@ -837,6 +846,9 @@ app.registerExtension({
                 if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
                     // Clear folder override to reload from connected input or widget
                     state.folderOverride = '';
+                    // Also clear the hidden folderOverride widget so Python gets the right value
+                    const fow = this.folderOverrideWidgets?.[this.activeTab];
+                    if (fow) fow.value = '';
                     this.loadImages(this.activeTab);
                     return true;
                 }
@@ -849,6 +861,9 @@ app.registerExtension({
                     if (state.parentFolder && state.parentFolder.length > 0) {
                         // Set folder override for navigation
                         state.folderOverride = state.parentFolder;
+                        // Update the hidden folderOverride widget so Python gets the right value
+                        const fow = this.folderOverrideWidgets?.[this.activeTab];
+                        if (fow) fow.value = state.parentFolder;
                         // Also update widget for non-connected case
                         const fw = this.folderWidgets?.[this.activeTab];
                         if (fw) {
@@ -1043,6 +1058,9 @@ app.registerExtension({
                             if (folderData && folderData.path) {
                                 // Set folder override for subfolder navigation
                                 state.folderOverride = folderData.path;
+                                // Update the hidden folderOverride widget so Python gets the right value
+                                const fow = this.folderOverrideWidgets?.[this.activeTab];
+                                if (fow) fow.value = folderData.path;
                                 // Also update widget for non-connected case
                                 const fw = this.folderWidgets?.[this.activeTab];
                                 if (fw) {
@@ -1106,7 +1124,8 @@ app.registerExtension({
             o.ifp_states = this.tabState.map(s => ({ 
                 sel: s.selectedIndex, 
                 page: s.currentPage,
-                sort: s.sortOrder 
+                sort: s.sortOrder,
+                folderOverride: s.folderOverride || ''
             }));
         };
         
@@ -1122,10 +1141,23 @@ app.registerExtension({
                         this.tabState[i].selectedIndex = o.ifp_states[i].sel ?? -1;
                         this.tabState[i].currentPage = o.ifp_states[i].page ?? 0;
                         this.tabState[i].sortOrder = o.ifp_states[i].sort ?? 'name';
+                        this.tabState[i].folderOverride = o.ifp_states[i].folderOverride ?? '';
                     }
                 }
             }
-            setTimeout(() => this.setupWidgets(), 100);
+            // After widgets are set up, sync folderOverride widgets with state
+            setTimeout(() => {
+                this.setupWidgets();
+                // Sync folderOverride widgets with tabState
+                if (this.folderOverrideWidgets) {
+                    for (let i = 0; i < 5; i++) {
+                        const fow = this.folderOverrideWidgets[i];
+                        if (fow && this.tabState[i].folderOverride) {
+                            fow.value = this.tabState[i].folderOverride;
+                        }
+                    }
+                }
+            }, 100);
         };
     }
 });

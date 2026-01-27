@@ -61,6 +61,11 @@ class ImageFolderPicker:
                 "selected_image3": ("STRING", {"default": ""}),
                 "selected_image4": ("STRING", {"default": ""}),
                 "selected_image5": ("STRING", {"default": ""}),
+                "folderOverride1": ("STRING", {"default": ""}),
+                "folderOverride2": ("STRING", {"default": ""}),
+                "folderOverride3": ("STRING", {"default": ""}),
+                "folderOverride4": ("STRING", {"default": ""}),
+                "folderOverride5": ("STRING", {"default": ""}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -147,25 +152,22 @@ class ImageFolderPicker:
                              folder4_input=None, folder5_input=None,
                              selected_image1="", selected_image2="", selected_image3="",
                              selected_image4="", selected_image5="",
+                             folderOverride1="", folderOverride2="", folderOverride3="",
+                             folderOverride4="", folderOverride5="",
                              unique_id=None):
-        """Load all selected images. folder*_input overrides folder* when connected.
+        """Load all selected images.
+        
+        Priority: folderOverride* > folder*_input > folder*
         
         Returns: (image1, image2, image3, image4, image5, mask1, mask2, mask3, mask4, mask5)
         """
-        # Debug logging
-        print(f"[ImageFolderPicker] load_selected_images called:")
-        print(f"  folder1={folder1!r}, selected_image1={selected_image1!r}")
-        print(f"  folder2={folder2!r}, selected_image2={selected_image2!r}")
-        print(f"  folder3={folder3!r}, selected_image3={selected_image3!r}")
-        print(f"  folder4={folder4!r}, selected_image4={selected_image4!r}")
-        print(f"  folder5={folder5!r}, selected_image5={selected_image5!r}")
-        
-        # Use input connections if provided, otherwise use widget values
-        f1 = folder1_input if folder1_input else folder1
-        f2 = folder2_input if folder2_input else folder2
-        f3 = folder3_input if folder3_input else folder3
-        f4 = folder4_input if folder4_input else folder4
-        f5 = folder5_input if folder5_input else folder5
+        # Folder resolution: folderOverride takes priority (set when navigating subfolders),
+        # then connected input, then widget value
+        f1 = folderOverride1 if folderOverride1 else (folder1_input if folder1_input else folder1)
+        f2 = folderOverride2 if folderOverride2 else (folder2_input if folder2_input else folder2)
+        f3 = folderOverride3 if folderOverride3 else (folder3_input if folder3_input else folder3)
+        f4 = folderOverride4 if folderOverride4 else (folder4_input if folder4_input else folder4)
+        f5 = folderOverride5 if folderOverride5 else (folder5_input if folder5_input else folder5)
         
         image1, mask1 = self.load_image(f1, selected_image1)
         image2, mask2 = self.load_image(f2, selected_image2)
@@ -180,14 +182,16 @@ class ImageFolderPicker:
                    folder1_input=None, folder2_input=None, folder3_input=None,
                    folder4_input=None, folder5_input=None,
                    selected_image1="", selected_image2="", selected_image3="",
-                   selected_image4="", selected_image5="", **kwargs):
+                   selected_image4="", selected_image5="",
+                   folderOverride1="", folderOverride2="", folderOverride3="",
+                   folderOverride4="", folderOverride5="", **kwargs):
         """Return hash for cache invalidation."""
-        # Use input connections if provided
-        f1 = folder1_input if folder1_input else folder1
-        f2 = folder2_input if folder2_input else folder2
-        f3 = folder3_input if folder3_input else folder3
-        f4 = folder4_input if folder4_input else folder4
-        f5 = folder5_input if folder5_input else folder5
+        # Folder resolution: folderOverride > input > widget
+        f1 = folderOverride1 if folderOverride1 else (folder1_input if folder1_input else folder1)
+        f2 = folderOverride2 if folderOverride2 else (folder2_input if folder2_input else folder2)
+        f3 = folderOverride3 if folderOverride3 else (folder3_input if folder3_input else folder3)
+        f4 = folderOverride4 if folderOverride4 else (folder4_input if folder4_input else folder4)
+        f5 = folderOverride5 if folderOverride5 else (folder5_input if folder5_input else folder5)
         
         parts = []
         
@@ -207,7 +211,9 @@ class ImageFolderPicker:
                         folder1_input=None, folder2_input=None, folder3_input=None,
                         folder4_input=None, folder5_input=None,
                         selected_image1="", selected_image2="", selected_image3="",
-                        selected_image4="", selected_image5="", **kwargs):
+                        selected_image4="", selected_image5="",
+                        folderOverride1="", folderOverride2="", folderOverride3="",
+                        folderOverride4="", folderOverride5="", **kwargs):
         """Validate inputs - we allow missing images (they return empty tensor)."""
         # Always return True - missing images will just return blank tensors
         # This allows the node to work even if paths are temporarily invalid
