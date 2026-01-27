@@ -421,7 +421,6 @@ app.registerExtension({
             }
             
             state.isLoading = true;
-            state.currentPage = 0;
             this.setDirtyCanvas(true);
             
             try {
@@ -433,11 +432,24 @@ app.registerExtension({
                     state.parentFolder = data.parent || '';
                     state.thumbnailCache = {};
                     
-                    // Restore selection if exists
+                    // Restore selection if exists and jump to correct page
                     const sel = this.selectedWidgets?.[tabIdx]?.value;
                     if (sel) {
                         const idx = state.images.findIndex(i => i.filename === sel);
                         state.selectedIndex = idx >= 0 ? idx : -1;
+                        
+                        // Jump to page containing selected image
+                        if (idx >= 0) {
+                            const L = this.getLayout();
+                            const totalFolders = this.hideFolders ? 0 : (state.subfolders?.length || 0);
+                            const itemIndex = totalFolders + idx; // Position in combined list
+                            state.currentPage = Math.floor(itemIndex / L.perPage);
+                        } else {
+                            state.currentPage = 0;
+                        }
+                    } else {
+                        state.selectedIndex = -1;
+                        state.currentPage = 0;
                     }
                     
                     this.loadThumbnails(tabIdx);
