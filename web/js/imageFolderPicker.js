@@ -227,13 +227,13 @@ app.registerExtension({
             this.setDirtyCanvas(true);
         };
         
-        // Handle connection changes - auto-load when folder input gets connected or disconnected
+        // Handle connection changes - auto-load when folder input gets connected
         const origOnConnectionsChange = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function(type, slotIndex, isConnected, link, ioSlot) {
             origOnConnectionsChange?.apply(this, arguments);
             
-            // Check if this is an input connection change (type 1 = input)
-            if (type === 1 && ioSlot?.name) {
+            // Check if this is an input connection (type 1 = input)
+            if (type === 1 && isConnected && ioSlot?.name) {
                 // Check if it's a folder input
                 const match = ioSlot.name.match(/^folder(\d+)_input$/);
                 if (match) {
@@ -944,7 +944,7 @@ app.registerExtension({
             // Draw semi-transparent overlay when workflow is executing
             if (_executionInProgress) {
                 ctx.save();
-                ctx.fillStyle = "rgba(80, 20, 20, 0.6)";
+                ctx.fillStyle = "rgba(71, 71, 71, 0.6)";
                 ctx.fillRect(0, L.top, this.size[0], this.size[1] - L.top);
                 
                 // Draw "Executing..." text
