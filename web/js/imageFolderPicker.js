@@ -117,6 +117,8 @@ app.registerExtension({
             this.tabState = [
                 { images: [], subfolders: [], parentFolder: '', thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name', folderOverride: '' },
                 { images: [], subfolders: [], parentFolder: '', thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name', folderOverride: '' },
+                { images: [], subfolders: [], parentFolder: '', thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name', folderOverride: '' },
+                { images: [], subfolders: [], parentFolder: '', thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name', folderOverride: '' },
                 { images: [], subfolders: [], parentFolder: '', thumbnailCache: {}, selectedIndex: -1, currentPage: 0, isLoading: false, sortOrder: 'name', folderOverride: '' }
             ];
             
@@ -138,20 +140,25 @@ app.registerExtension({
             this.folderWidgets = [
                 this.widgets?.find(w => w.name === "folder1"),
                 this.widgets?.find(w => w.name === "folder2"),
-                this.widgets?.find(w => w.name === "folder3")
+                this.widgets?.find(w => w.name === "folder3"),
+                this.widgets?.find(w => w.name === "folder4"),
+                this.widgets?.find(w => w.name === "folder5")
             ];
             
             this.selectedWidgets = [
                 this.widgets?.find(w => w.name === "selected_image1"),
                 this.widgets?.find(w => w.name === "selected_image2"),
-                this.widgets?.find(w => w.name === "selected_image3")
+                this.widgets?.find(w => w.name === "selected_image3"),
+                this.widgets?.find(w => w.name === "selected_image4"),
+                this.widgets?.find(w => w.name === "selected_image5")
             ];
             
-            // Hide all widgets - we draw our own UI
+            // Hide all widgets visually - we draw our own UI
+            // IMPORTANT: Don't change w.type to "hidden" as that prevents serialization!
             if (this.widgets) {
                 for (const w of this.widgets) {
-                    w.type = "hidden";
                     w.computeSize = () => [0, -4];
+                    w.computedHeight = 0;
                 }
             }
             
@@ -413,9 +420,9 @@ app.registerExtension({
             const state = this.getState();
             
             // === TABS ===
-            const tabW = (this.size[0] - 16) / 3;
+            const tabW = (this.size[0] - 16) / 5;
             this._tabs = [];
-            for (let i = 0; i < 3; i++) {
+            for (let i = 0; i < 5; i++) {
                 const x = 8 + i * tabW;
                 const y = L.top;
                 this._tabs.push({ x, y, w: tabW - 2, h: TAB_HEIGHT - 2 });
@@ -800,7 +807,7 @@ app.registerExtension({
             
             // Tab clicks
             if (this._tabs) {
-                for (let i = 0; i < 3; i++) {
+                for (let i = 0; i < 5; i++) {
                     const t = this._tabs[i];
                     if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h) {
                         this.activeTab = i;
@@ -908,7 +915,7 @@ app.registerExtension({
                         if (this.thumbnailSize !== item.size) {
                             this.thumbnailSize = item.size;
                             // Clear all thumbnail caches to reload with new size
-                            for (let i = 0; i < 3; i++) {
+                            for (let i = 0; i < 5; i++) {
                                 this.tabState[i].thumbnailCache = {};
                                 if (this.tabState[i].images.length > 0) {
                                     this.loadThumbnails(i);
@@ -1110,7 +1117,7 @@ app.registerExtension({
             this.activeTab = o.ifp_tab ?? 0;
             this.thumbnailSize = o.ifp_thumbSize ?? DEFAULT_THUMBNAIL_SIZE;
             if (o.ifp_states) {
-                for (let i = 0; i < 3; i++) {
+                for (let i = 0; i < 5; i++) {
                     if (o.ifp_states[i]) {
                         this.tabState[i].selectedIndex = o.ifp_states[i].sel ?? -1;
                         this.tabState[i].currentPage = o.ifp_states[i].page ?? 0;
