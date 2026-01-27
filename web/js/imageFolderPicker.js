@@ -227,13 +227,13 @@ app.registerExtension({
             this.setDirtyCanvas(true);
         };
         
-        // Handle connection changes - auto-load when folder input gets connected
+        // Handle connection changes - auto-load when folder input gets connected or disconnected
         const origOnConnectionsChange = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function(type, slotIndex, isConnected, link, ioSlot) {
             origOnConnectionsChange?.apply(this, arguments);
             
-            // Check if this is an input connection (type 1 = input)
-            if (type === 1 && isConnected && ioSlot?.name) {
+            // Check if this is an input connection change (type 1 = input)
+            if (type === 1 && ioSlot?.name) {
                 // Check if it's a folder input
                 const match = ioSlot.name.match(/^folder(\d+)_input$/);
                 if (match) {
