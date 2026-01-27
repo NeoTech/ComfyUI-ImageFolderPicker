@@ -76,8 +76,9 @@ const INFO_HEIGHT = 24; // Height for filename + resolution text below thumbnail
 
 // Global preview overlay element
 let previewOverlay = null;
+let previewKeyHandler = null;
 
-function showPreviewOverlay(imageSrc, filename, onClose) {
+function showPreviewOverlay(imageSrc, filename, onClose, onPrev, onNext, hasPrev, hasNext) {
     // Create overlay if doesn't exist
     if (!previewOverlay) {
         previewOverlay = document.createElement('div');
@@ -99,15 +100,31 @@ function showPreviewOverlay(imageSrc, filename, onClose) {
         document.body.appendChild(previewOverlay);
     }
     
+    // Build navigation buttons
+    const prevBtnStyle = hasPrev 
+        ? 'background: #444; cursor: pointer; opacity: 1;'
+        : 'background: #222; cursor: default; opacity: 0.3;';
+    const nextBtnStyle = hasNext 
+        ? 'background: #444; cursor: pointer; opacity: 1;'
+        : 'background: #222; cursor: default; opacity: 0.3;';
+    
     previewOverlay.innerHTML = `
         <div style="position: absolute; top: 15px; right: 20px; width: 36px; height: 36px; 
                     background: #c44; border-radius: 4px; display: flex; align-items: center; 
                     justify-content: center; cursor: pointer; font-size: 20px; color: white;
                     font-weight: bold;" id="ifp-close-btn">✕</div>
+        <div style="position: absolute; left: 20px; top: 50%; transform: translateY(-50%); 
+                    width: 50px; height: 80px; ${prevBtnStyle}
+                    border-radius: 4px; display: flex; align-items: center; justify-content: center;
+                    font-size: 28px; color: white;" id="ifp-prev-btn">◀</div>
+        <div style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); 
+                    width: 50px; height: 80px; ${nextBtnStyle}
+                    border-radius: 4px; display: flex; align-items: center; justify-content: center;
+                    font-size: 28px; color: white;" id="ifp-next-btn">▶</div>
         <div style="background: repeating-conic-gradient(#999 0% 25%, #ccc 0% 50%) 50% / 20px 20px;
                     border: 3px solid #4a9eff; border-radius: 4px; display: inline-block;
-                    max-width: 90vw; max-height: 90vh;">
-            <img src="${imageSrc}" style="max-width: 90vw; max-height: 90vh; object-fit: contain; 
+                    max-width: calc(90vw - 160px); max-height: 90vh;">
+            <img src="${imageSrc}" style="max-width: calc(90vw - 160px); max-height: 90vh; object-fit: contain; 
                  display: block;" />
         </div>
         <div style="color: #ccc; font-size: 14px; margin-top: 12px; font-family: Arial, sans-serif;">
@@ -117,30 +134,52 @@ function showPreviewOverlay(imageSrc, filename, onClose) {
     
     previewOverlay.style.display = 'flex';
     
-    // Close handlers
+    // Remove previous key handler if any
+    if (previewKeyHandler) {
+        document.removeEventListener('keydown', previewKeyHandler);
+    }
+    
+    // Close handler
     const closeHandler = (e) => {
-        if (e.target === previewOverlay || e.target.id === 'ifp-close-btn' || e.target.closest('#ifp-close-btn')) {
+        const target = e.target;
+        if (target === previewOverlay || target.id === 'ifp-close-btn' || target.closest('#ifp-close-btn')) {
             hidePreviewOverlay();
             onClose?.();
+        } else if ((target.id === 'ifp-prev-btn' || target.closest('#ifp-prev-btn')) && hasPrev) {
+            e.stopPropagation();
+            onPrev?.();
+        } else if ((target.id === 'ifp-next-btn' || target.closest('#ifp-next-btn')) && hasNext) {
+            e.stopPropagation();
+            onNext?.();
         }
     };
     
-    const keyHandler = (e) => {
+    // Key handler for arrow keys and escape
+    previewKeyHandler = (e) => {
         if (e.key === 'Escape') {
             hidePreviewOverlay();
             onClose?.();
-            document.removeEventListener('keydown', keyHandler);
+        } else if (e.key === 'ArrowLeft' && hasPrev) {
+            e.preventDefault();
+            onPrev?.();
+        } else if (e.key === 'ArrowRight' && hasNext) {
+            e.preventDefault();
+            onNext?.();
         }
     };
     
     previewOverlay.onclick = closeHandler;
-    document.addEventListener('keydown', keyHandler);
+    document.addEventListener('keydown', previewKeyHandler);
 }
 
 function hidePreviewOverlay() {
     if (previewOverlay) {
         previewOverlay.style.display = 'none';
         previewOverlay.onclick = null;
+    }
+    if (previewKeyHandler) {
+        document.removeEventListener('keydown', previewKeyHandler);
+        previewKeyHandler = null;
     }
 }
 
@@ -1430,15 +1469,32 @@ app.registerExtension({
                             }
                             return true;
                         } else {
-                            // Double-click on image - show preview
+                            // Double-click on image - show preview with navigation
                             const imgIdx = i - L.totalFolders;
                             const folder = this.getFolderPath(this.activeTab);
-                            const filename = state.images[imgIdx].filename;
-                            if (folder && filename) {
+                            const images = state.images;
+                            
+                            // Function to show image at index with navigation
+                            const showImageAtIndex = (idx) => {
+                                if (idx < 0 || idx >= images.length) return;
+                                const filename = images[idx].filename;
                                 const imageSrc = `/imagefolderpicker/image?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(filename)}`;
-                                showPreviewOverlay(imageSrc, filename, () => {
-                                    // Callback when closed - nothing needed
-                                });
+                                const hasPrev = idx > 0;
+                                const hasNext = idx < images.length - 1;
+                                
+                                showPreviewOverlay(
+                                    imageSrc, 
+                                    filename, 
+                                    () => { /* closed */ },
+                                    () => showImageAtIndex(idx - 1),  // onPrev
+                                    () => showImageAtIndex(idx + 1),  // onNext
+                                    hasPrev,
+                                    hasNext
+                                );
+                            };
+                            
+                            if (folder && images[imgIdx]) {
+                                showImageAtIndex(imgIdx);
                             }
                             return true;
                         }
