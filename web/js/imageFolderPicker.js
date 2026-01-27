@@ -1133,13 +1133,28 @@ app.registerExtension({
                 ctx.fillStyle = "rgba(71, 71, 71, 0.6)";
                 ctx.fillRect(8, L.contentTop, this.size[0] - 16, L.galleryHeight);
                 
-                // Draw "Executing..." text
-                ctx.fillStyle = "#ff6666";
+                // Draw "Executing..." text with solid background
+                const centerX = this.size[0] / 2;
+                const centerY = L.contentTop + L.galleryHeight / 2;
+                const labelText = "⏳ Executing...";
                 ctx.font = "bold 14px Arial";
+                const textWidth = ctx.measureText(labelText).width;
+                const labelPadX = 16;
+                const labelPadY = 8;
+                const labelW = textWidth + labelPadX * 2;
+                const labelH = 24 + labelPadY;
+                
+                // Solid background (90% black)
+                ctx.fillStyle = "rgba(0, 0, 0, 0.9)";
+                ctx.beginPath();
+                ctx.roundRect(centerX - labelW / 2, centerY - labelH / 2, labelW, labelH, 6);
+                ctx.fill();
+                
+                // Red text
+                ctx.fillStyle = "#ff6666";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                const centerY = L.contentTop + L.galleryHeight / 2;
-                ctx.fillText("⏳ Executing...", this.size[0] / 2, centerY);
+                ctx.fillText(labelText, centerX, centerY);
                 ctx.restore();
             }
         };
