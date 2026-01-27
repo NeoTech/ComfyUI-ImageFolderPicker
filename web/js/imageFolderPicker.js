@@ -69,7 +69,7 @@ const DEFAULT_THUMBNAIL_SIZE = 128;
 
 const THUMBNAIL_PADDING = 6;
 const TAB_HEIGHT = 26;
-const NAV_HEIGHT = 26;
+const NAV_HEIGHT = 40; // Height for navigation area (buttons are 36px tall)
 const CONTROLS_HEIGHT = 30;
 const PATH_BAR_HEIGHT = 26;
 const INFO_HEIGHT = 24; // Height for filename + resolution text below thumbnail
@@ -1016,7 +1016,7 @@ app.registerExtension({
             ctx.fillStyle = "#aaa";
             ctx.font = "11px Arial";
             ctx.textAlign = "center";
-            ctx.fillText(`${state.currentPage + 1}/${L.pages}`, cx, L.navY + 15);
+            ctx.fillText(`${state.currentPage + 1}/${L.pages}`, cx, L.navY + navBtnH/2 + 4);
             
             // Draw right buttons
             drawNavBtn(this._nextBtn, "1▶", canNext);
@@ -1031,7 +1031,7 @@ app.registerExtension({
             const countText = L.totalFolders > 0 
                 ? `${L.totalFolders} 📁 ${L.totalImages} imgs` 
                 : `${L.totalImages} imgs`;
-            ctx.fillText(countText, this.size[0] - 10, L.navY + 15);
+            ctx.fillText(countText, this.size[0] - 10, L.navY + navBtnH/2 + 4);
             
             // === SIZE PICKER MENU (drawn last to overlay everything) ===
             if (this.showSizeMenu && this._thumbSizeBtn) {
