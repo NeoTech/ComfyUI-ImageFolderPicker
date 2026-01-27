@@ -1473,10 +1473,15 @@ app.registerExtension({
                             const imgIdx = i - L.totalFolders;
                             const folder = this.getFolderPath(this.activeTab);
                             const images = state.images;
+                            const node = this;
+                            
+                            // Track current index for selection on close
+                            let currentPreviewIdx = imgIdx;
                             
                             // Function to show image at index with navigation
                             const showImageAtIndex = (idx) => {
                                 if (idx < 0 || idx >= images.length) return;
+                                currentPreviewIdx = idx;
                                 const filename = images[idx].filename;
                                 const imageSrc = `/imagefolderpicker/image?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(filename)}`;
                                 const hasPrev = idx > 0;
@@ -1485,7 +1490,15 @@ app.registerExtension({
                                 showPreviewOverlay(
                                     imageSrc, 
                                     filename, 
-                                    () => { /* closed */ },
+                                    () => {
+                                        // On close - select the current image
+                                        state.selectedIndex = currentPreviewIdx;
+                                        const fn = images[currentPreviewIdx].filename;
+                                        const sw = node.selectedWidgets?.[node.activeTab];
+                                        if (sw) sw.value = fn;
+                                        node.setDirtyCanvas(true);
+                                        node.graph?.change();
+                                    },
                                     () => showImageAtIndex(idx - 1),  // onPrev
                                     () => showImageAtIndex(idx + 1),  // onNext
                                     hasPrev,
