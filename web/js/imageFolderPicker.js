@@ -163,6 +163,95 @@ app.registerExtension({
         };
         
         // Helper to get folder path - checks folderOverride first (for subfolder navigation), then connected input, then widget value
+        // Helper function to extract string value from a node
+        function getNodeStringValue(node, slotIdx) {
+            if (!node) return null;
+            
+            // Try to get the output value - check widgets first
+            // For String/primitive nodes, look for a value widget
+            const valueWidget = node.widgets?.find(w => 
+                w.name === "value" || w.name === "text" || w.name === "string"
+            );
+            if (valueWidget?.value) {
+                return valueWidget.value;
+            }
+            
+            // Also check if origin node has getOutputData (executed value)
+            if (typeof node.getOutputData === 'function') {
+                const data = node.getOutputData(slotIdx);
+                if (data) return data;
+            }
+            
+            return null;
+        }
+        
+        // Helper function to trace value through a subgraph's output
+        function getSubgraphOutputValue(subgraphNode, outputSlotIdx) {
+            // Check if this is actually a subgraph node
+            if (!subgraphNode?.isSubgraphNode?.() || !subgraphNode.subgraph) {
+                return null;
+            }
+            
+            const subgraph = subgraphNode.subgraph;
+            
+            // Try to find the subgraph's output definition for this slot
+            // Subgraph outputs have linkIds that point to internal links
+            const subgraphOutput = subgraph.outputs?.[outputSlotIdx];
+            if (subgraphOutput?.linkIds?.length > 0) {
+                // Find the internal link that feeds this output
+                const internalLinkId = subgraphOutput.linkIds[0];
+                const internalLink = subgraph.links?.[internalLinkId] || 
+                                     subgraph._links?.get?.(internalLinkId);
+                
+                if (internalLink) {
+                    // Get the internal node that provides this output
+                    const internalOriginNode = subgraph.getNodeById?.(internalLink.origin_id);
+                    if (internalOriginNode) {
+                        // Recursively check if it's also a subgraph
+                        if (internalOriginNode.isSubgraphNode?.()) {
+                            return getSubgraphOutputValue(internalOriginNode, internalLink.origin_slot);
+                        }
+                        return getNodeStringValue(internalOriginNode, internalLink.origin_slot);
+                    }
+                }
+            }
+            
+            // Alternative: iterate through subgraph nodes to find primitive/string nodes
+            // This handles cases where the output mapping isn't explicit
+            if (subgraph.nodes) {
+                for (const internalNode of subgraph.nodes) {
+                    // Skip subgraph IO nodes
+                    const nodeType = internalNode.type?.toLowerCase() || '';
+                    if (nodeType.includes('subgraphinput') || nodeType.includes('subgraphoutput')) {
+                        continue;
+                    }
+                    
+                    // Check for output connections to subgraph output
+                    if (internalNode.outputs) {
+                        for (let i = 0; i < internalNode.outputs.length; i++) {
+                            const output = internalNode.outputs[i];
+                            if (output?.links?.length > 0) {
+                                // Check if any of these links eventually connect to the subgraph output
+                                const value = getNodeStringValue(internalNode, i);
+                                if (value && typeof value === 'string') {
+                                    return value;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Also check nodes that might just have a value widget even without output links
+                    const value = getNodeStringValue(internalNode, 0);
+                    if (value && typeof value === 'string' && 
+                        (nodeType.includes('string') || nodeType.includes('primitive') || nodeType.includes('text'))) {
+                        return value;
+                    }
+                }
+            }
+            
+            return null;
+        }
+        
         nodeType.prototype.getFolderPath = function(tabIdx) {
             // Check for folder override (used when navigating into subfolders)
             const state = this.tabState[tabIdx];
@@ -179,23 +268,41 @@ app.registerExtension({
                 const linkId = this.inputs[inputIdx].link;
                 const link = app.graph.links[linkId];
                 if (link) {
-                    const originNode = app.graph.getNodeById(link.origin_id);
+                    // Use resolve() to handle subgraphs/virtual connections properly
+                    let originNode = null;
+                    let originSlot = link.origin_slot;
+                    
+                    if (typeof link.resolve === 'function') {
+                        // Modern ComfyUI with subgraph support
+                        const resolved = link.resolve(app.graph);
+                        if (resolved) {
+                            // resolved can have subgraphInput (for subgraph inputs) or output (for regular/subgraph outputs)
+                            const resolvedInfo = resolved.subgraphInput ?? resolved.output;
+                            if (resolvedInfo?.node) {
+                                originNode = resolvedInfo.node;
+                                originSlot = resolvedInfo.slot ?? 0;
+                            }
+                        }
+                    }
+                    
+                    // Fallback to direct node lookup if resolve didn't work
+                    if (!originNode) {
+                        originNode = app.graph.getNodeById(link.origin_id);
+                    }
+                    
                     if (originNode) {
-                        // Try to get the output value - check widgets first
-                        const originOutput = originNode.outputs?.[link.origin_slot];
-                        
-                        // For String/primitive nodes, look for a value widget
-                        const valueWidget = originNode.widgets?.find(w => 
-                            w.name === "value" || w.name === "text" || w.name === "string"
-                        );
-                        if (valueWidget?.value) {
-                            return valueWidget.value;
+                        // First, check if this is a subgraph node (acting as a storage bin)
+                        if (originNode.isSubgraphNode?.()) {
+                            const subgraphValue = getSubgraphOutputValue(originNode, originSlot);
+                            if (subgraphValue) {
+                                return subgraphValue;
+                            }
                         }
                         
-                        // Also check if origin node has getOutputData (executed value)
-                        if (typeof originNode.getOutputData === 'function') {
-                            const data = originNode.getOutputData(link.origin_slot);
-                            if (data) return data;
+                        // Regular node - get value directly
+                        const value = getNodeStringValue(originNode, originSlot);
+                        if (value) {
+                            return value;
                         }
                     }
                 }
