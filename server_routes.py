@@ -27,6 +27,29 @@ def get_thumbnail_path(folder, filename, size=128):
     return thumbs_dir, os.path.join(thumbs_dir, thumb_filename)
 
 
+def create_checker_background(size, checker_size=8):
+    """Create a checkered background image for transparency indication."""
+    width, height = size
+    background = Image.new('RGB', (width, height))
+    
+    # Light and dark checker colors (typical Photoshop-style)
+    light = (204, 204, 204)  # #cccccc
+    dark = (153, 153, 153)   # #999999
+    
+    for y in range(0, height, checker_size):
+        for x in range(0, width, checker_size):
+            # Determine checker color based on position
+            is_light = ((x // checker_size) + (y // checker_size)) % 2 == 0
+            color = light if is_light else dark
+            
+            # Fill the checker square
+            for dy in range(min(checker_size, height - y)):
+                for dx in range(min(checker_size, width - x)):
+                    background.putpixel((x + dx, y + dy), color)
+    
+    return background
+
+
 def generate_thumbnail(image_path, thumb_path, size=128):
     """Generate a thumbnail for an image and save it."""
     try:
@@ -42,22 +65,26 @@ def generate_thumbnail(image_path, thumb_path, size=128):
             from PIL import ImageOps
             img = ImageOps.exif_transpose(img)
             
-            # Convert to RGB for JPEG
-            if img.mode in ('RGBA', 'P', 'LA'):
-                # Create white background for transparent images
-                background = Image.new('RGB', img.size, (255, 255, 255))
+            # Create thumbnail maintaining aspect ratio first
+            img.thumbnail(thumb_size, Image.Resampling.LANCZOS)
+            
+            # Handle transparency with checkered background
+            if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                # Convert palette images to RGBA
                 if img.mode == 'P':
                     img = img.convert('RGBA')
-                if img.mode in ('RGBA', 'LA'):
-                    background.paste(img, mask=img.split()[-1])
-                    img = background
-                else:
-                    img = img.convert('RGB')
+                elif img.mode == 'LA':
+                    img = img.convert('RGBA')
+                
+                # Create checkered background at thumbnail size
+                checker_size = max(4, size // 16)  # Scale checker size with thumbnail
+                background = create_checker_background(img.size, checker_size)
+                
+                # Composite image over checkered background
+                background.paste(img, mask=img.split()[-1])
+                img = background
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
-            
-            # Create thumbnail maintaining aspect ratio
-            img.thumbnail(thumb_size, Image.Resampling.LANCZOS)
             
             # Save as JPEG
             img.save(thumb_path, 'JPEG', quality=85)

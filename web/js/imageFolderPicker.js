@@ -49,8 +49,11 @@ function showPreviewOverlay(imageSrc, filename, onClose) {
                     background: #c44; border-radius: 4px; display: flex; align-items: center; 
                     justify-content: center; cursor: pointer; font-size: 20px; color: white;
                     font-weight: bold;" id="ifp-close-btn">✕</div>
-        <img src="${imageSrc}" style="max-width: 90vw; max-height: 85vh; object-fit: contain; 
-             border: 3px solid #4a9eff; border-radius: 4px;" />
+        <div style="background: repeating-conic-gradient(#999 0% 25%, #ccc 0% 50%) 50% / 20px 20px;
+                    border: 3px solid #4a9eff; border-radius: 4px; display: inline-block;">
+            <img src="${imageSrc}" style="max-width: 90vw; max-height: 85vh; object-fit: contain; 
+                 display: block;" />
+        </div>
         <div style="color: #ccc; font-size: 14px; margin-top: 12px; font-family: Arial, sans-serif;">
             ${filename}
         </div>
