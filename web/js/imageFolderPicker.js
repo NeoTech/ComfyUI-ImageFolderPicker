@@ -1127,18 +1127,18 @@ app.registerExtension({
             }
             
             // === EXECUTION OVERLAY ===
-            // Draw semi-transparent overlay when workflow is executing
+            // Draw semi-transparent overlay over gallery area only when workflow is executing
             if (_executionInProgress) {
                 ctx.save();
                 ctx.fillStyle = "rgba(71, 71, 71, 0.6)";
-                ctx.fillRect(0, L.top, this.size[0], this.size[1] - L.top);
+                ctx.fillRect(8, L.contentTop, this.size[0] - 16, L.galleryHeight);
                 
                 // Draw "Executing..." text
                 ctx.fillStyle = "#ff6666";
                 ctx.font = "bold 14px Arial";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                const centerY = L.top + (this.size[1] - L.top) / 2;
+                const centerY = L.contentTop + L.galleryHeight / 2;
                 ctx.fillText("⏳ Executing...", this.size[0] / 2, centerY);
                 ctx.restore();
             }
