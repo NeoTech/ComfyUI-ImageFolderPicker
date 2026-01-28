@@ -686,8 +686,9 @@ app.registerExtension({
         nodeType.prototype.getLayout = function() {
             // Calculate layout dimensions
             const thumbSize = this.thumbnailSize || DEFAULT_THUMBNAIL_SIZE;
+            const inputH = (this.inputs?.length || 0) * 1 + 2;  // <-- ADD THIS LINE
             const outputH = (this.outputs?.length || 0) * 20 + 6;
-            const top = 30 + outputH; // Header + outputs
+            const top = 30 + inputH + outputH; // Header + inputs + outputs
             const contentTop = top + TAB_HEIGHT + PATH_BAR_HEIGHT + CONTROLS_HEIGHT;
             const navY = this.size[1] - NAV_HEIGHT - 4;
             const galleryHeight = navY - contentTop - 8;

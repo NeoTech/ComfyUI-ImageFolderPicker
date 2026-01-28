@@ -72,11 +72,12 @@ class ImageFolderPicker:
             }
         }
     
-    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "IMAGE", "IMAGE", "MASK", "MASK", "MASK", "MASK", "MASK")
-    RETURN_NAMES = ("image1", "image2", "image3", "image4", "image5", "mask1", "mask2", "mask3", "mask4", "mask5")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    RETURN_NAMES = ("images", "masks", "filepaths")
+    OUTPUT_IS_LIST = (True, True, True)
     FUNCTION = "load_selected_images"
     CATEGORY = "image"
-    DESCRIPTION = "Browse folders and pick images from thumbnails. Has 5 tabs, each outputting a separate image and its alpha channel as a mask."
+    DESCRIPTION = "Browse folders and pick images from thumbnails. Has 5 tabs, outputting lists of images, masks, and filepaths. Use GetTabOutput node to extract individual tabs."
     
     def load_image(self, folder, selected_image):
         """Load a single image and return (image_tensor, mask_tensor) tuple.
@@ -175,7 +176,19 @@ class ImageFolderPicker:
         image4, mask4 = self.load_image(f4, selected_image4)
         image5, mask5 = self.load_image(f5, selected_image5)
         
-        return (image1, image2, image3, image4, image5, mask1, mask2, mask3, mask4, mask5)
+        # Build full file paths
+        filepath1 = os.path.join(f1, selected_image1) if f1 and selected_image1 else ""
+        filepath2 = os.path.join(f2, selected_image2) if f2 and selected_image2 else ""
+        filepath3 = os.path.join(f3, selected_image3) if f3 and selected_image3 else ""
+        filepath4 = os.path.join(f4, selected_image4) if f4 and selected_image4 else ""
+        filepath5 = os.path.join(f5, selected_image5) if f5 and selected_image5 else ""
+        
+        # Return as lists (v2.0.0 breaking change)
+        images = [image1, image2, image3, image4, image5]
+        masks = [mask1, mask2, mask3, mask4, mask5]
+        filepaths = [filepath1, filepath2, filepath3, filepath4, filepath5]
+        
+        return (images, masks, filepaths)
     
     @classmethod
     def IS_CHANGED(cls, folder1="", folder2="", folder3="", folder4="", folder5="",
