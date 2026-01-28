@@ -297,15 +297,18 @@ app.registerExtension({
             this.size[0] = Math.max(this.size[0], 380);
             this.size[1] = Math.max(this.size[1], 500);
             
-            // Setup after widgets are created
+            // Setup after widgets are created - use multiple attempts to ensure all widgets are hidden
+            // Some widgets may be created asynchronously by ComfyUI
             setTimeout(() => this.setupWidgets(), 100);
+            setTimeout(() => this.setupWidgets(), 300);
+            setTimeout(() => this.setupWidgets(), 500);
             
             return result;
         };
         
         nodeType.prototype.setupWidgets = function() {
-            if (this._widgetsSetup) return;
-            this._widgetsSetup = true;
+            // Always re-hide widgets on each call to catch any late-created widgets
+            this.hideAllWidgets();
             
             // Store references to widgets
             this.folderWidgets = [
@@ -333,16 +336,28 @@ app.registerExtension({
                 this.widgets?.find(w => w.name === "folderOverride5")
             ];
             
+            this.hideAllWidgets();
+            this.setDirtyCanvas(true);
+        };
+        
+        // Helper to hide all widgets - can be called multiple times safely
+        nodeType.prototype.hideAllWidgets = function() {
             // Hide all widgets visually - we draw our own UI
             // IMPORTANT: Don't change w.type to "hidden" as that prevents serialization!
             if (this.widgets) {
                 for (const w of this.widgets) {
                     w.computeSize = () => [0, -4];
                     w.computedHeight = 0;
+                    // Additional hiding methods
+                    w.hidden = true;
+                    w.y = -10000;  // Push off-screen
+                    // Override draw to do nothing
+                    if (!w._originalDraw) {
+                        w._originalDraw = w.draw;
+                        w.draw = function() {};
+                    }
                 }
             }
-            
-            this.setDirtyCanvas(true);
         };
         
         // Handle connection changes - auto-load when folder input gets connected
@@ -698,6 +713,9 @@ app.registerExtension({
         nodeType.prototype.onDrawForeground = function(ctx) {
             origDraw?.apply(this, arguments);
             if (this.flags.collapsed) return;
+            
+            // Continuously ensure all widgets are hidden (catches any late-created widgets)
+            this.hideAllWidgets();
             
             const L = this.getLayout();
             const state = this.getState();
